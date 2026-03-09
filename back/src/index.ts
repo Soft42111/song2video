@@ -913,9 +913,37 @@ async function setupGlobalListeners(client: any) {
                     if (currentChunk && currentChunk.projectId === projectId) {
                         if (currentChunk.phase === 'image') {
                             if (!imageUrl) {
-                                job.status = 'failed';
-                                job.error = 'Image media filtered';
-                                saveJobs();
+                                // Content was filtered — retry with a safe fallback prompt
+                                const filterRetries = currentChunk.filterRetryCount || 0;
+                                const MAX_FILTER_RETRIES = 2;
+
+                                if (filterRetries < MAX_FILTER_RETRIES) {
+                                    currentChunk.filterRetryCount = filterRetries + 1;
+                                    currentChunk.status = 'pending';
+                                    currentChunk.projectId = null;
+                                    // Generate a generic safe cinematic prompt
+                                    const safePrompts = [
+                                        'Cinematic landscape with soft golden light, aerial view of rolling hills at sunrise, no people',
+                                        'Abstract fluid art, swirling vibrant colors on dark canvas, smooth motion',
+                                        'Close-up of musical notes floating in glowing mist, dark ethereal atmosphere'
+                                    ];
+                                    currentChunk.prompt = safePrompts[filterRetries % safePrompts.length];
+                                    console.warn(`[SONG] ⚠️ Image filtered for chunk ${job.currentChunkIndex + 1}. Retrying (${filterRetries + 1}/${MAX_FILTER_RETRIES}) with safe prompt...`);
+                                    addLog(songId, `Part ${job.currentChunkIndex + 1}: Image filtered by safety system. Retrying with alternative visual...`);
+                                    job.step = `Part ${job.currentChunkIndex + 1}: Retrying with safe prompt...`;
+                                    saveJobs();
+                                    // Re-trigger same chunk
+                                    triggerNextChunk(songId, client);
+                                } else {
+                                    // Exhausted retries — skip this chunk and move on
+                                    console.error(`[SONG] ❌ Chunk ${job.currentChunkIndex + 1} exhausted all filter retries. Skipping...`);
+                                    addLog(songId, `Part ${job.currentChunkIndex + 1}: Skipped after repeated filtering.`);
+                                    currentChunk.status = 'skipped';
+                                    job.currentChunkIndex++;
+                                    job.progress = Math.round((job.currentChunkIndex / job.chunks.length) * 100);
+                                    saveJobs();
+                                    triggerNextChunk(songId, client);
+                                }
                                 break;
                             }
                             transitionChunkToVideo(songId, currentChunk, imageUrl, client);
