@@ -83,6 +83,22 @@ export default function App() {
     }
   };
 
+  const handleCancelJob = async (id: string) => {
+    try {
+      await fetch(`${API_BASE}/api/cleanup/${id}`, { method: 'DELETE' });
+    } catch (e) { }
+    await db.updateProject(id, { status: 'failed', error: 'Cancelled by user', step: 'Cancelled' });
+    loadProjects();
+    setActiveProjectId(null);
+  };
+
+  const handleRetryJob = async (job: ProjectRecord) => {
+    // Go back to the upload screen with the same prompt pre-filled
+    setCustomPrompt(job.prompt || '');
+    setActiveProjectId(null);
+    setCostEstimate(null);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement> | any) => {
     const file = e.dataTransfer ? e.dataTransfer.files[0] : e.target.files?.[0];
     if (!file) return;
@@ -484,8 +500,8 @@ export default function App() {
                   <X size={14} /> Close
                 </button>
                 {activeJob.status === 'processing' && (
-                  <button onClick={(e) => handleDeleteProject(activeJob.id, e)} className="sogni-btn-ultra !py-2 !px-4 !text-xs !bg-red-900/20 !text-red-400 !border-red-500/30 hover:!bg-red-900/50">
-                    <Trash2 size={14} /> Terminate
+                  <button onClick={() => handleCancelJob(activeJob.id)} className="sogni-btn-ultra !py-2 !px-4 !text-xs !bg-red-900/20 !text-red-400 !border-red-500/30 hover:!bg-red-900/50">
+                    <X size={14} /> Cancel
                   </button>
                 )}
               </div>
@@ -548,17 +564,25 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="mt-auto pt-4 relative z-10">
+              <div className="mt-auto pt-4 relative z-10 flex flex-col gap-3">
                 {activeJob.status === 'completed' && activeJob.videoUrl && (
                   <a href={activeJob.videoUrl} download className="sogni-btn-ultra primary w-full flex justify-center py-4 text-base">
                     <Download size={18} /> Export Master Video
                   </a>
                 )}
                 {activeJob.status === 'failed' && (
-                  <div className="p-4 rounded-xl bg-[#110505] border border-red-500/20 text-red-400 flex items-start gap-3 shadow-[0_0_20px_rgba(255,0,0,0.05)_inset]">
-                    <AlertCircle className="shrink-0 mt-0.5 text-red-500" size={18} />
-                    <div className="text-sm font-medium leading-relaxed">{activeJob.error}</div>
-                  </div>
+                  <>
+                    <div className="p-4 rounded-xl bg-[#110505] border border-red-500/20 text-red-400 flex items-start gap-3 shadow-[0_0_20px_rgba(255,0,0,0.05)_inset]">
+                      <AlertCircle className="shrink-0 mt-0.5 text-red-500" size={18} />
+                      <div className="text-sm font-medium leading-relaxed">{activeJob.error}</div>
+                    </div>
+                    <button
+                      onClick={() => handleRetryJob(activeJob)}
+                      className="sogni-btn-ultra w-full flex justify-center py-3 text-sm gap-2 !border-[var(--neon-purple)]/30 hover:!bg-[var(--neon-purple)]/10"
+                    >
+                      <Loader2 size={16} /> Retry Generation
+                    </button>
+                  </>
                 )}
               </div>
             </div>
