@@ -416,67 +416,58 @@ export default function App() {
                 </div>
 
                 {/* Generate Action */}
-                <div className="mt-10 flex flex-col items-center gap-4">
-                  <button
-                    onClick={handleGenerate}
-                    disabled={!selectedFile || isProcessing}
-                    className={`sogni-btn-ultra primary px-12 py-5 text-lg flex items-center gap-3 transition-all ${!selectedFile || isProcessing ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:scale-[1.02] active:scale-95'
-                      }`}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="animate-spin" size={24} />
-                        Synthesizing...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={24} fill="currentColor" />
-                        INITIATE GENERATION
-                      </>
-                    )}
-                  </button>
-                  <p className="text-[10px] text-gray-600 font-bold uppercase tracking-[0.2em]">Ready for visual deployment</p>
-                  {/* Cost Estimate Panel */}
-                  <div className="mt-6 w-full">
-                    {selectedFile && !isProcessing && !costEstimate && (
-                      <p className="text-center text-xs text-gray-600 font-bold uppercase tracking-[0.2em]">Estimated cost will appear after upload</p>
-                    )}
+                <div className="mt-10 flex flex-col items-center gap-3">
+                  <div className="flex items-center gap-5 flex-wrap justify-center">
+                    <button
+                      onClick={handleGenerate}
+                      disabled={!selectedFile || isProcessing}
+                      className={`sogni-btn-ultra primary px-12 py-5 text-lg flex items-center gap-3 transition-all ${!selectedFile || isProcessing ? 'opacity-50 cursor-not-allowed grayscale' : 'hover:scale-[1.02] active:scale-95'}`}
+                    >
+                      {isProcessing ? (
+                        <><Loader2 className="animate-spin" size={24} />Synthesizing...</>
+                      ) : (
+                        <><Zap size={24} fill="currentColor" />INITIATE GENERATION</>
+                      )}
+                    </button>
+
                     {costEstimate && (
-                      <div className="bg-[#0d0d0f] border border-white/5 rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs uppercase font-bold tracking-widest text-[var(--neon-purple)]">Estimated Cost</span>
-                          <button onClick={() => setShowReceipt(!showReceipt)} className="text-xs text-gray-500 hover:text-white transition-colors underline underline-offset-4">
-                            {showReceipt ? 'Hide Receipt' : 'Full Receipt'}
-                          </button>
-                        </div>
-                        <div className="flex items-baseline gap-2">
+                      <div className="flex flex-col items-start gap-0.5">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-gray-500 font-bold text-sm">~</span>
                           <span className="text-2xl font-black text-white">{costEstimate.totalSpark.toFixed(2)}</span>
-                          <span className="text-sm text-[var(--neon-cyan)] font-bold">SPRK</span>
-                          <span className="text-xs text-gray-600 ml-2">across {costEstimate.chunks.length} parts</span>
+                          <span className="text-xs text-[var(--neon-cyan)] font-bold">SPRK</span>
                         </div>
-                        {showReceipt && (
-                          <div className="mt-4 space-y-2 border-t border-white/5 pt-4">
-                            <div className="grid grid-cols-5 text-[10px] uppercase tracking-widest text-gray-600 font-bold pb-1">
-                              <span>Part</span><span className="col-span-2">Segment</span><span className="text-right">Img</span><span className="text-right">Total</span>
-                            </div>
-                            {costEstimate.chunks.map((c: any) => (
-                              <div key={c.index} className="grid grid-cols-5 text-xs text-gray-400 items-start">
-                                <span className="text-white font-bold">{c.index}</span>
-                                <span className="col-span-2 truncate text-gray-500">{c.text?.substring(0, 30)}...</span>
-                                <span className="text-right">{c.imgCost.toFixed(1)}</span>
-                                <span className="text-right text-white font-bold">{c.total.toFixed(2)} SPRK</span>
-                              </div>
-                            ))}
-                            <div className="border-t border-white/5 pt-2 flex justify-between text-xs">
-                              <span className="text-gray-500">Total (Image + Video)</span>
-                              <span className="text-[var(--neon-cyan)] font-black">{costEstimate.totalSpark.toFixed(2)} SPRK</span>
-                            </div>
-                          </div>
-                        )}
+                        <button onClick={() => setShowReceipt(!showReceipt)} className="text-[10px] text-gray-600 hover:text-[var(--neon-purple)] transition-colors underline underline-offset-2">
+                          {showReceipt ? 'hide receipt' : 'full receipt ↓'}
+                        </button>
                       </div>
                     )}
                   </div>
+
+                  {/* Receipt Breakdown */}
+                  {showReceipt && costEstimate && (
+                    <div className="w-full max-w-sm bg-[#0d0d0f] border border-white/5 rounded-xl p-4">
+                      <div className="grid grid-cols-5 text-[10px] uppercase tracking-widest text-gray-600 font-bold pb-2 border-b border-white/5 mb-2">
+                        <span>#</span><span className="col-span-2">Segment</span><span className="text-right">Img</span><span className="text-right">Total</span>
+                      </div>
+                      {costEstimate.chunks.map((c: any) => (
+                        <div key={c.index} className="grid grid-cols-5 text-xs text-gray-400 items-center py-1">
+                          <span className="text-white font-bold">{c.index}</span>
+                          <span className="col-span-2 truncate text-gray-500 pr-2">{c.text?.substring(0, 25)}…</span>
+                          <span className="text-right text-gray-600">{c.imgCost.toFixed(1)}</span>
+                          <span className="text-right text-white font-bold">{c.total.toFixed(2)}</span>
+                        </div>
+                      ))}
+                      <div className="border-t border-white/5 pt-2 mt-1 flex justify-between text-xs">
+                        <span className="text-gray-500">Total Est.</span>
+                        <span className="text-[var(--neon-cyan)] font-black">~{costEstimate.totalSpark.toFixed(2)} SPRK</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-[10px] text-gray-600 font-bold uppercase tracking-[0.2em]">Ready for visual deployment</p>
                 </div>
+
               </div>
           </motion.div>
         )}
