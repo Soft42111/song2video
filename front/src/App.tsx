@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { db } from './db';
 import type { ProjectRecord } from './db';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE = 'http://localhost:3001';
 const ESTIMATED_SPARK_PER_SEC = 1.6;
 
 export default function App() {
@@ -177,6 +177,13 @@ export default function App() {
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="ultra-card w-full max-w-md p-8 relative">
               <button onClick={() => setShowSettings(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white transition-colors"><X size={20} /></button>
               <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><Settings className="text-[var(--neon-purple)]" /> Configuration</h2>
+
+              <div className="bg-[var(--neon-purple)]/5 border border-[var(--neon-purple)]/20 rounded-xl p-4 mb-6 flex items-start gap-3">
+                <Info size={18} className="text-[var(--neon-purple)] mt-0.5 shrink-0" />
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  <span className="text-white font-bold">Privacy Note:</span> Your credentials are encrypted and stored <span className="text-white">only locally</span> in your browser's IndexedDB. They never leave your device except to authenticate directly with the Sogni API via our stateless bridge.
+                </p>
+              </div>
 
               <div className="space-y-6">
                 <div>
