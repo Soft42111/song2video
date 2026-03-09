@@ -50,3 +50,8 @@ This project is open-source and available under the **MIT License**.
 Developed by **Basit**.
 Check out more on [Basitresume.xyz](https://Basitresume.xyz/) or follow on [X](https://x.com/soft4211).
 Powered by [Sogni.ai](https://sogni.ai).
+
+---
+
+### 🧪 Ready to Test?
+Check out the [Full Tester Guide](./TesterGuide.md) for step-by-step instructions.
