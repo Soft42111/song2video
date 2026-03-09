@@ -6,6 +6,17 @@ import type { ProjectRecord } from './db';
 
 const API_BASE = 'http://localhost:3001';
 const ESTIMATED_SPARK_PER_SEC = 1.6;
+const SPARK_PER_IMAGE = 0.5; // Sogni image gen cost estimate
+
+function estimateSparkCost(chunks: any[]): { chunks: any[], totalSpark: number } {
+  const detailed = chunks.map((c: any, i: number) => {
+    const imgCost = SPARK_PER_IMAGE;
+    const vidCost = parseFloat(c.duration || 5) * ESTIMATED_SPARK_PER_SEC;
+    return { index: i + 1, text: c.text, duration: c.duration, imgCost, vidCost, total: imgCost + vidCost };
+  });
+  const totalSpark = detailed.reduce((sum, c) => sum + c.total, 0);
+  return { chunks: detailed, totalSpark };
+}
 
 export default function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -16,6 +27,8 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPolicy, setShowPolicy] = useState(false);
   const [policyTab, setPolicyTab] = useState<'privacy' | 'terms' | 'license'>('license');
+  const [costEstimate, setCostEstimate] = useState<{ chunks: any[], totalSpark: number } | null>(null);
+  const [showReceipt, setShowReceipt] = useState(false);
 
   const [theme, setTheme] = useState('');
   const [mood, setMood] = useState('');
@@ -110,6 +123,11 @@ export default function App() {
       }
 
       if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+      // Store cost estimate from returned chunks
+      if (data.chunks) {
+        setCostEstimate(estimateSparkCost(data.chunks));
+      }
 
       await db.saveProject({
         id: data.projectId,
@@ -418,9 +436,48 @@ export default function App() {
                     )}
                   </button>
                   <p className="text-[10px] text-gray-600 font-bold uppercase tracking-[0.2em]">Ready for visual deployment</p>
+                  {/* Cost Estimate Panel */}
+                  <div className="mt-6 w-full">
+                    {selectedFile && !isProcessing && !costEstimate && (
+                      <p className="text-center text-xs text-gray-600 font-bold uppercase tracking-[0.2em]">Estimated cost will appear after upload</p>
+                    )}
+                    {costEstimate && (
+                      <div className="bg-[#0d0d0f] border border-white/5 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs uppercase font-bold tracking-widest text-[var(--neon-purple)]">Estimated Cost</span>
+                          <button onClick={() => setShowReceipt(!showReceipt)} className="text-xs text-gray-500 hover:text-white transition-colors underline underline-offset-4">
+                            {showReceipt ? 'Hide Receipt' : 'Full Receipt'}
+                          </button>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-2xl font-black text-white">{costEstimate.totalSpark.toFixed(2)}</span>
+                          <span className="text-sm text-[var(--neon-cyan)] font-bold">SPRK</span>
+                          <span className="text-xs text-gray-600 ml-2">across {costEstimate.chunks.length} parts</span>
+                        </div>
+                        {showReceipt && (
+                          <div className="mt-4 space-y-2 border-t border-white/5 pt-4">
+                            <div className="grid grid-cols-5 text-[10px] uppercase tracking-widest text-gray-600 font-bold pb-1">
+                              <span>Part</span><span className="col-span-2">Segment</span><span className="text-right">Img</span><span className="text-right">Total</span>
+                            </div>
+                            {costEstimate.chunks.map((c: any) => (
+                              <div key={c.index} className="grid grid-cols-5 text-xs text-gray-400 items-start">
+                                <span className="text-white font-bold">{c.index}</span>
+                                <span className="col-span-2 truncate text-gray-500">{c.text?.substring(0, 30)}...</span>
+                                <span className="text-right">{c.imgCost.toFixed(1)}</span>
+                                <span className="text-right text-white font-bold">{c.total.toFixed(2)} SPRK</span>
+                              </div>
+                            ))}
+                            <div className="border-t border-white/5 pt-2 flex justify-between text-xs">
+                              <span className="text-gray-500">Total (Image + Video)</span>
+                              <span className="text-[var(--neon-cyan)] font-black">{costEstimate.totalSpark.toFixed(2)} SPRK</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
           </motion.div>
         )}
 
