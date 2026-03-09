@@ -304,7 +304,9 @@ export default function App() {
           <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Power</span>
         </div>
         <div className="h-4 w-[1px] bg-white/20"></div>
-        <div className="meter-value">~{ESTIMATED_SPARK_PER_SEC} SPARK / S</div>
+        <div className="meter-value">
+          {costEstimate ? `~${costEstimate.totalSpark.toFixed(2)} SPRK` : `~${ESTIMATED_SPARK_PER_SEC} SPARK/s`}
+        </div>
       </div>
 
       {/* Top Navigation Bar */}
