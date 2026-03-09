@@ -468,7 +468,8 @@ export default function App() {
                   <p className="text-[10px] text-gray-600 font-bold uppercase tracking-[0.2em]">Ready for visual deployment</p>
                 </div>
 
-              </div>
+              </div>  {/* end right column */}
+            </div>  {/* end 12-col grid */}
           </motion.div>
         )}
 
