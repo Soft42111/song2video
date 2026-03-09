@@ -32,9 +32,15 @@ SOGNI_PASSWORD=your_password
 
 ### 🌐 Free Hosting Options
 - **Frontend**: [Vercel](https://vercel.com) (Free Tier) - Root: `front`
-- **Backend**: [Render.com](https://render.com) (Free "Web Service" Tier) - Root: `back` 
-    - *Note: Render's free tier is perfect as it supports Node.js and includes FFmpeg.*
-- **Alternative**: [Railway.app](https://railway.app) (Free trial credits).
+- **Backend**: [Render.com](https://render.com) (Free "Web Service") - Root: `back` 
+    - **Build Command**: `npm install`
+    - **Start Command**: `npm run dev`
+    - **Env Vars**: 
+        - `GEMINI_API_KEY`: *(Your global key)*
+        - `PORT`: `3001`
+
+> [!IMPORTANT]
+> This app is designed for users to provide their **own** Sogni credentials in the UI. You only need to provide the `GEMINI_API_KEY` in the hosting environment.
 
 ---
 

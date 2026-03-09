@@ -6,9 +6,11 @@ Welcome to the testing phase of **SONG2VID**! This guide will walk you through t
 1.  **Clone the Repo**: `git clone https://github.com/Soft42111/song2video.git`
 2.  **Environment Setup**:
     -   Go to `back/` and create a `.env` file.
-    -   Add your `GEMINI_API_KEY`, `SOGNI_USERNAME`, and `SOGNI_PASSWORD`.
+    -   Add your global `GEMINI_API_KEY`. 
+    -   *(Optional)*: If you want a default Sogni account for all users, add `SOGNI_USERNAME` and `SOGNI_PASSWORD` to the `.env` as well.
 3.  **Run Servers**:
     -   **Backend**: `cd back && npm install && npm run dev`
+        -   **Render Config**: Build Command: `npm install` | Start Command: `npm run dev` | Root: `back`
     -   **Frontend**: `cd front && npm install && npm run dev`
 4.  **Open the App**: Visit `http://localhost:5173`.
     -   **Production**: Set `VITE_API_URL` in your hosting provider (e.g., Vercel/Netlify) to your backend's public URL.
