@@ -1,0 +1,8 @@
+{
+    "name": "song2video-root",
+    "private": true,
+    "scripts": {
+        "build": "cd front && npm install && npm run build",
+        "install": "cd front && npm install && cd ../back && npm install"
+    }
+}
