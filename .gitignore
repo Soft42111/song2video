@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+back/uploads/*
+!back/uploads/.gitkeep
+front/dist/
+*.log
+*.txt
+back/jobs.json
+.DS_Store
+# Scratch scripts
+back/check_balance.*
+back/test_*.js
+back/test_*.ts
+back/sample_speech.mp3
