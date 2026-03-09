@@ -28,7 +28,7 @@ SOGNI_USERNAME=your_username
 SOGNI_PASSWORD=your_password
 ```
 > [!NOTE]
-> The production API is located at `api.basitresume.xyz`.
+> For production, set the `VITE_API_URL` environment variable in your frontend hosting service to point to your deployed backend.
 
 ### 3. Install & Run
 ```bash

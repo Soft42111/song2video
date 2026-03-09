@@ -11,7 +11,7 @@ Welcome to the testing phase of **SONG2VID**! This guide will walk you through t
     -   **Backend**: `cd back && npm install && npm run dev`
     -   **Frontend**: `cd front && npm install && npm run dev`
 4.  **Open the App**: Visit `http://localhost:5173`.
-    -   **Production API**: `https://api.basitresume.xyz`
+    -   **Production**: Set `VITE_API_URL` in your hosting provider (e.g., Vercel/Netlify) to your backend's public URL.
 
 ## 🎨 2. The Core Generation Flow
 Testing the end-to-end "Song-to-Video" pipeline:
