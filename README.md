@@ -30,18 +30,13 @@ SOGNI_PASSWORD=your_password
 > [!NOTE]
 > For production, set the `VITE_API_URL` environment variable in your frontend hosting service to point to your deployed backend.
 
-### 3. Install & Run
-```bash
-# Terminal 1: Backend
-cd back
-npm install
-npm run dev
+### 🌐 Free Hosting Options
+- **Frontend**: [Vercel](https://vercel.com) (Free Tier) - Root: `front`
+- **Backend**: [Render.com](https://render.com) (Free "Web Service" Tier) - Root: `back` 
+    - *Note: Render's free tier is perfect as it supports Node.js and includes FFmpeg.*
+- **Alternative**: [Railway.app](https://railway.app) (Free trial credits).
 
-# Terminal 2: Frontend
-cd front
-npm install
-npm run dev
-```
+---
 
 ## 📜 License
 This project is open-source and available under the **MIT License**.
