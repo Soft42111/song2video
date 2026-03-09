@@ -15,4 +15,3 @@ back/test_*.ts
 back/sample_speech.mp3
 # Dev-only docs
 TesterGuide.md
-vercel.json
