@@ -27,6 +27,8 @@ SOGNI_API_KEY=your_optional_sogni_key
 SOGNI_USERNAME=your_username
 SOGNI_PASSWORD=your_password
 ```
+> [!NOTE]
+> The production API is located at `api.basitresume.xyz`.
 
 ### 3. Install & Run
 ```bash

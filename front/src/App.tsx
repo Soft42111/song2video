@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { db } from './db';
 import type { ProjectRecord } from './db';
 
-const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '';
+const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3001' : 'https://api.basitresume.xyz';
 const ESTIMATED_SPARK_PER_SEC = 1.6;
 
 export default function App() {
