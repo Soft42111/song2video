@@ -329,7 +329,10 @@ export default function App() {
             <div className="mr-6 bg-[#111] px-4 py-2 rounded-lg border border-white/5 flex items-center gap-2">
               <span className="subheader">Wallet</span>
               <span className="text-sm font-bold text-white">
-                {(Number(balance.sparkBalance || balance.spark || 0)).toFixed(2)} SPRK
+                {tokenType === 'spark'
+                  ? `${(Number(balance.sparkBalance || balance.spark || 0)).toFixed(2)} SPRK`
+                  : `${(Number(balance.sogniBalance || balance.sogni || 0))} SOGNI`
+                }
               </span>
             </div>
           )}
