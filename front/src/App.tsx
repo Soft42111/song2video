@@ -496,10 +496,10 @@ export default function App() {
 
         {/* Active Job Dashboard - Cinematic Card */}
         {activeJob && !showHistory && (
-          <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-[1400px] ultra-card flex flex-col lg:flex-row overflow-hidden flex-1">
+          <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="w-full max-w-6xl ultra-card flex flex-col lg:flex-row overflow-hidden flex-1">
 
             {/* Visualizer Frame */}
-            <div className="lg:w-2/3 bg-black flex flex-col relative border-r border-white/5">
+            <div className="lg:w-3/5 bg-black flex flex-col relative border-r border-white/5">
               <div className="absolute top-6 left-6 z-20 flex gap-3">
                 <button onClick={() => setActiveProjectId(null)} className="sogni-btn-ultra !py-2 !px-4 !text-xs !bg-black/50 !backdrop-blur-md">
                   <X size={14} /> Close
@@ -511,12 +511,12 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex-1 flex items-center justify-center p-8 lg:p-12 relative overflow-hidden">
+              <div className="flex-1 flex items-center justify-center p-4 lg:p-6 relative overflow-hidden">
                 {/* Decorative background glow for visualizer */}
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,245,255,0.05)_0%,transparent_60%)] pointer-events-none"></div>
 
                 {activeJob.localVideoBlob || (activeJob.videoUrl && activeJob.status === 'completed') ? (
-                  <video controls autoPlay loop className="w-full h-full object-contain rounded-xl border border-white/10 shadow-2xl relative z-10 bg-[#08080a]" src={activeJob.localVideoBlob ? URL.createObjectURL(activeJob.localVideoBlob) : `${API_BASE}/api/proxy?url=${encodeURIComponent(activeJob.videoUrl!)}`} />
+                  <video controls autoPlay loop className="max-w-full max-h-[75vh] object-contain rounded-xl border border-white/10 shadow-2xl relative z-10 bg-[#08080a]" src={activeJob.localVideoBlob ? URL.createObjectURL(activeJob.localVideoBlob) : `${API_BASE}/api/proxy?url=${encodeURIComponent(activeJob.videoUrl!)}`} />
                 ) : (
                   <div className="flex flex-col items-center relative z-10">
                     <div className="w-24 h-24 border-2 border-dashed border-white/20 rounded-full flex items-center justify-center mb-8 relative">
@@ -531,7 +531,7 @@ export default function App() {
             </div>
 
             {/* Telemetry Panel */}
-            <div className="lg:w-1/3 bg-[#0d0d0f] p-8 lg:p-10 flex flex-col relative">
+            <div className="lg:w-2/5 bg-[#0d0d0f] p-6 lg:p-8 flex flex-col relative">
               <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
                 <h3 className="font-['Geist'] text-xl font-bold flex items-center gap-3"><Info className="text-[var(--neon-cyan)]" size={20} /> Telemetry</h3>
                 <div className="text-right">
