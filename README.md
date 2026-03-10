@@ -1,4 +1,4 @@
-# SOGNI STUDIO 🎨🎬🎵
+# SOGNI SONG2VID STUDIO 🎨🎬🎵
 
 A full-spectrum AI creation studio powered by **Sogni AI** and **Google Gemini**. Generate images, videos, and music — all from your browser.
 
