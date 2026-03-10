@@ -211,17 +211,27 @@ function loadJobs() {
 
 async function resumeJobs() {
     let resumedCount = 0;
-    const client = await getSogniClient();
+    let client: any = null;
 
-    for (const [id, job] of Object.entries(jobs)) {
+    for (const [id, job] of Object.entries(jobs) as [string, any][]) {
         if (job.status === 'processing') {
             console.log(`[RESUME] Attempting to resume job: ${id}`);
             if (job.type === 'song-video') {
-                triggerNextChunk(id, client);
-                resumedCount++;
+                try {
+                    // Try to get a client using the job's stored auth or env vars
+                    if (!client) {
+                        client = await getSogniClient(job.auth || undefined);
+                        await setupGlobalListeners(client);
+                    }
+                    triggerNextChunk(id, client);
+                    resumedCount++;
+                } catch (err: any) {
+                    console.warn(`[RESUME] Cannot resume job ${id}: ${err.message}. Marking as failed.`);
+                    job.status = 'failed';
+                    job.error = 'Could not reconnect after server restart. Please retry.';
+                    job.step = 'Failed: Auth unavailable on restart';
+                }
             } else if (job.type === 'video' || job.type === 'audio') {
-                // For direct jobs, we might need to check Sogni status or just let them fail if they was one-off
-                // but for "oneshot" we try to re-bind if possible or mark as failed with resume instruction
                 job.status = 'failed';
                 job.error = 'Process interrupted (Server Restart)';
                 job.step = 'Failed: Server was restarted';
@@ -230,8 +240,8 @@ async function resumeJobs() {
     }
     if (resumedCount > 0) {
         console.log(`[RESUME] Successfully resumed ${resumedCount} jobs.`);
-        saveJobs();
     }
+    saveJobs();
 }
 
 loadJobs();
@@ -976,19 +986,31 @@ async function setupGlobalListeners(client: any) {
 
     client.on(ClientEvent.PROJECT_PROGRESS, (data: any) => {
         const { projectId, percentage } = data;
-        console.log(`[EVENT] 📊 PROJECT_PROGRESS: ${projectId} -> ${percentage}%`);
+        const safePercentage = Number.isFinite(percentage) ? percentage : null;
+        if (safePercentage !== null) {
+            console.log(`[EVENT] 📊 PROJECT_PROGRESS: ${projectId} -> ${safePercentage}%`);
+        }
+
         if (jobs[projectId]) {
-            jobs[projectId].progress = percentage;
-            if (jobs[projectId].status !== 'completed') {
-                jobs[projectId].step = `Rendering: ${percentage}%`;
+            if (safePercentage !== null) {
+                jobs[projectId].progress = safePercentage;
+                if (jobs[projectId].status !== 'completed') {
+                    jobs[projectId].step = `Rendering: ${safePercentage}%`;
+                }
+                saveJobs();
             }
-            saveJobs();
         } else {
             for (const job of Object.values(jobs)) {
                 if (job.type === 'song-video' && job.status === 'processing') {
                     const currentChunk = job.chunks[job.currentChunkIndex];
                     if (currentChunk && currentChunk.projectId === projectId) {
-                        job.step = `Rendering Part ${job.currentChunkIndex + 1} of ${job.chunks.length}: ${percentage}%`;
+                        const chunkProgress = safePercentage !== null ? ` ${safePercentage}%` : '';
+                        const phaseLabel = currentChunk.phase === 'image' ? 'Image' : 'Video';
+                        job.step = `Rendering Part ${job.currentChunkIndex + 1} of ${job.chunks.length} [${phaseLabel}]${chunkProgress}`;
+                        // Calculate overall progress from chunk completion
+                        const baseProgress = Math.round((job.currentChunkIndex / job.chunks.length) * 100);
+                        const chunkContribution = safePercentage !== null ? Math.round((safePercentage / 100) * (100 / job.chunks.length) * 0.5) : 0;
+                        job.progress = Math.min(99, baseProgress + chunkContribution);
                         saveJobs();
                         break;
                     }
@@ -1010,12 +1032,8 @@ async function setupGlobalListeners(client: any) {
     setListenersAttached(true);
 }
 
-// Initial Listener Setup
-getSogniClient().then(client => {
-    setupGlobalListeners(client);
-}).catch(err => {
-    console.error('Initial Sogni connection failed:', err.message);
-});
+// Note: Global listeners are attached lazily on first successful connection
+// via setupGlobalListeners() calls in balance/generate endpoints.
 
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);

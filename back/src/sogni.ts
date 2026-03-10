@@ -53,13 +53,19 @@ export async function getSogniClient(auth?: AuthConfig) {
         const config: any = {
             network: 'fast',
             autoConnect: false,
-            authType: 'token',
             debug: true
         };
 
-        if (username) config.username = username;
-        if (password) config.password = password;
-        if (apiKey) config.apiKey = apiKey;
+        if (apiKey) {
+            // API Key auth: only set apiKey, no username/password
+            config.authType = 'apiKey';
+            config.apiKey = apiKey;
+        } else {
+            // Credentials auth: set username/password with token auth
+            config.authType = 'token';
+            config.username = username;
+            config.password = password;
+        }
 
         sogniClient = new SogniClientWrapper(config);
     }
