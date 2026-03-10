@@ -87,8 +87,7 @@ app.post('/api/retry/:id', async (req, res) => {
     if (job.type === 'song-video') {
         try {
             const client = await getSogniClient();
-            // Start from the currentChunkIndex where it failed
-            triggerNextChunk(id, client);
+            triggerAvailableChunks(id, client);
             res.json({ status: 'retrying', projectId: id });
         } catch (e: any) {
             res.status(500).json({ error: e.message });
@@ -236,7 +235,7 @@ async function resumeJobs() {
                         client = await getSogniClient(job.auth || undefined);
                         await setupGlobalListeners(client);
                     }
-                    triggerNextChunk(id, client);
+                    triggerAvailableChunks(id, client);
                     resumedCount++;
                 } catch (err: any) {
                     console.warn(`[RESUME] Cannot resume job ${id}: ${err.message}. Marking as failed.`);
@@ -504,134 +503,162 @@ app.post('/api/transcribe', upload.single('audio'), async (req: any, res) => {
     }
 });
 
-// Helper to trigger the next chunk of a song job
-async function triggerNextChunk(songJobId: string, client: any) {
+// Parallel chunk processing constants
+const PARALLEL_LIMIT = 2;
+
+// Helper to check if all chunks are done and trigger stitching
+async function checkAndStitch(songJobId: string) {
     const job = jobs[songJobId];
     if (!job || job.type !== 'song-video') return;
 
-    // Stop processing if job was cancelled or failed
-    if (job.status === 'cancelled' || job.status === 'failed') {
-        console.log(`[SONG] ⛔ Job ${songJobId} is ${job.status}. Stopping chunk processing.`);
-        return;
-    }
+    const allDone = job.chunks.every((c: any) => c.status === 'completed' || c.status === 'skipped');
+    if (!allDone) return;
 
-    const currentIdx = job.currentChunkIndex;
-    const chunk = job.chunks[currentIdx];
-
-    if (!chunk) {
-        addLog(songJobId, `All ${job.chunks.length} chunks complete. Starting final stitching...`);
-        // No more chunks, stitch videos!
-        console.log(`\n========================================`);
-        console.log(`[SONG] ALL ${job.chunks.length} CHUNKS COMPLETE`);
-        console.log(`[SONG] Starting FFmpeg stitching...`);
-        console.log(`========================================\n`);
-        job.step = 'Stitching Video Clips...';
-        saveJobs();
-
-        try {
-            const videoPaths = job.chunks.map((c: any) => c.localPath).filter(Boolean);
-            console.log(`[SONG] Final Video Paths for Stitching:`, videoPaths);
-
-            if (videoPaths.length === 0) {
-                throw new Error("No valid local video paths found for stitching.");
-            }
-
-            const outputName = `stitched-${Date.now()}.mp4`;
-            const outputPath = path.join(uploadsDir, outputName);
-
-            await stitchVideos(videoPaths, job.audioPath, outputPath);
-
-            // Immediate cleanup of chunks after successful stitching
-            videoPaths.forEach((p: string) => {
-                try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { }
-            });
-
-            job.status = 'completed';
-            job.progress = 100;
-            job.step = 'Process Completed';
-            job.videoUrl = `http://localhost:${process.env.PORT || 3001}/api/uploads/${outputName}`;
-            addLog(songJobId, `✅ STITCHING COMPLETE! Video ready: ${outputName}`);
-            saveJobs();
-            console.log(`[SONG] ✅ STITCHING COMPLETE → ${outputName}`);
-        } catch (err: any) {
-            console.error(`[SONG] ❌ STITCHING FAILED:`, err.message);
-            job.status = 'failed';
-            job.error = 'Stitching failed: ' + err.message;
-            job.step = 'Stitching failed';
-            saveJobs();
-        }
-        return;
-    }
-
-    job.step = `Rendering Part ${currentIdx + 1} of ${job.chunks.length} [Image Generation]`;
-    addLog(songJobId, `Starting Part ${currentIdx + 1}/${job.chunks.length}: Generating reference image...`);
+    addLog(songJobId, `All ${job.chunks.length} chunks complete. Starting final stitching...`);
+    console.log(`\n========================================`);
+    console.log(`[SONG] ALL ${job.chunks.length} CHUNKS COMPLETE`);
+    console.log(`[SONG] Starting FFmpeg stitching...`);
+    console.log(`========================================\n`);
+    job.step = 'Stitching Video Clips...';
     saveJobs();
 
-    console.log(`\n----------------------------------------`);
-    console.log(`[SONG] 🖼️  CHUNK ${currentIdx + 1}/${job.chunks.length} — IMAGE GENERATION`);
-    console.log(`[SONG]    Prompt: "${chunk.prompt.substring(0, 80)}..."`);
-    console.log(`[SONG]    Duration: ${chunk.duration}s`);
-    console.log(`----------------------------------------`);
+    try {
+        const videoPaths = job.chunks.map((c: any) => c.localPath).filter(Boolean);
+        console.log(`[SONG] Final Video Paths for Stitching:`, videoPaths);
 
-    // Phase 1: Generate reference image
-    const imageConfig = {
-        type: 'image',
-        modelId: 'z_image_turbo_bf16',
-        positivePrompt: chunk.prompt,
-        tokenType: job.tokenType || 'spark',
-        waitForCompletion: false,
-        width: 512,
-        height: 512,
-        format: 'jpg'
-    };
-
-    let retryCount = 0;
-    const maxRetries = 3;
-    let success = false;
-
-    while (retryCount < maxRetries && !success) {
-        try {
-            addLog(songJobId, `Sending image generation request to Sogni Cloud...`);
-            let result = await client.createProject(imageConfig as any);
-            chunk.projectId = (result as any).project.id;
-            chunk.status = 'processing';
-            chunk.phase = 'image';
-            addLog(songJobId, `Image project created successfully. ID: ${chunk.projectId}. Waiting for progress...`);
-            saveJobs();
-            console.log(`[SONG] 🖼️  Image project created → ID: ${chunk.projectId} (Attempt ${retryCount + 1})`);
-            success = true;
-        } catch (err: any) {
-            console.warn(`[SONG] ⚠️ IMAGE CREATION ATTEMPT ${retryCount + 1} FAILED for chunk ${currentIdx + 1}:`, err.message);
-
-            if (err.message && (err.message.includes('nonce') || err.message.includes('400') || err.message.includes('fetch') || err.message.includes('ENOTFOUND'))) {
-                console.log(`[SONG] Detected connection/DNS issue. Re-connecting and retrying...`);
-                try {
-                    await client.disconnect();
-                } catch (e) { }
-                client = await getSogniClient();
-                retryCount++;
-                // Wait briefly before retry
-                await new Promise(r => setTimeout(r, 2000 * retryCount));
-            } else {
-                // Unrecoverable error
-                console.error(`[SONG] ❌ UNRECOVERABLE IMAGE CREATION ERROR:`, err.message);
-                job.status = 'failed';
-                job.error = err.message;
-                job.step = `Error creating image for chunk ${currentIdx + 1}: ${err.message}`;
-                saveJobs();
-                return;
-            }
+        if (videoPaths.length === 0) {
+            throw new Error("No valid local video paths found for stitching.");
         }
-    }
 
-    if (!success) {
-        console.error(`[SONG] ❌ IMAGE CREATION FAILED after ${maxRetries} attempts`);
+        const outputName = `stitched-${Date.now()}.mp4`;
+        const outputPath = path.join(uploadsDir, outputName);
+
+        await stitchVideos(videoPaths, job.audioPath, outputPath);
+
+        // Immediate cleanup of chunks after successful stitching
+        videoPaths.forEach((p: string) => {
+            try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (e) { }
+        });
+
+        job.status = 'completed';
+        job.progress = 100;
+        job.step = 'Process Completed';
+        job.videoUrl = `http://localhost:${process.env.PORT || 3001}/api/uploads/${outputName}`;
+        addLog(songJobId, `✅ STITCHING COMPLETE! Video ready: ${outputName}`);
+        saveJobs();
+        console.log(`[SONG] ✅ STITCHING COMPLETE → ${outputName}`);
+    } catch (err: any) {
+        console.error(`[SONG] ❌ STITCHING FAILED:`, err.message);
         job.status = 'failed';
-        job.error = "Max retries reached for underlying connection issues";
-        job.step = `Error creating image for chunk ${currentIdx + 1}: Connection failed`;
+        job.error = 'Stitching failed: ' + err.message;
+        job.step = 'Stitching failed';
         saveJobs();
     }
 }
+
+// Launch up to PARALLEL_LIMIT pending chunks as direct T2V projects
+async function triggerAvailableChunks(songJobId: string, client: any) {
+    const job = jobs[songJobId];
+    if (!job || job.type !== 'song-video') return;
+
+    if (job.status === 'cancelled' || job.status === 'failed') {
+        console.log(`[SONG] ⛔ Job ${songJobId} is ${job.status}. Stopping.`);
+        return;
+    }
+
+    // Count currently active chunks
+    const activeCount = job.chunks.filter((c: any) => c.status === 'processing').length;
+    const slotsAvailable = PARALLEL_LIMIT - activeCount;
+
+    if (slotsAvailable <= 0) return;
+
+    // Find pending chunks to launch
+    const pendingChunks = job.chunks.filter((c: any) => c.status === 'pending');
+
+    if (pendingChunks.length === 0) {
+        // No pending chunks — check if everything is done
+        await checkAndStitch(songJobId);
+        return;
+    }
+
+    const toLaunch = pendingChunks.slice(0, slotsAvailable);
+
+    for (const chunk of toLaunch) {
+        const chunkIdx = chunk.index;
+
+        console.log(`\n----------------------------------------`);
+        console.log(`[SONG] 🎬 CHUNK ${chunkIdx + 1}/${job.chunks.length} — DIRECT T2V`);
+        console.log(`[SONG]    Prompt: "${chunk.prompt.substring(0, 80)}..."`);
+        console.log(`[SONG]    Duration: ${chunk.duration}s`);
+        console.log(`----------------------------------------`);
+
+        const frames = Math.min(160, Math.max(16, Math.round(chunk.duration * 16)));
+
+        const videoConfig = {
+            type: 'video',
+            modelId: 'wan_v2.2-14b-fp8_t2v',
+            positivePrompt: `cinematic 360 panoramic view, ${chunk.prompt}`,
+            frames: frames,
+            fps: 16,
+            width: 512,
+            height: 512,
+            tokenType: job.tokenType || 'spark',
+            network: 'fast',
+            waitForCompletion: false
+        };
+
+        let retryCount = 0;
+        const maxRetries = 3;
+        let success = false;
+
+        while (retryCount < maxRetries && !success) {
+            try {
+                addLog(songJobId, `Launching Part ${chunkIdx + 1} (T2V direct)...`);
+                let result = await client.createProject(videoConfig as any);
+                chunk.projectId = (result as any).project.id;
+                chunk.status = 'processing';
+                chunk.phase = 'video';
+                addLog(songJobId, `Part ${chunkIdx + 1} project created: ${chunk.projectId}`);
+                saveJobs();
+                console.log(`[SONG] 🎬 T2V project created → ID: ${chunk.projectId} (Attempt ${retryCount + 1})`);
+                success = true;
+            } catch (err: any) {
+                console.warn(`[SONG] ⚠️ T2V ATTEMPT ${retryCount + 1} FAILED for chunk ${chunkIdx + 1}:`, err.message);
+                if (err.message && (err.message.includes('nonce') || err.message.includes('400') || err.message.includes('fetch') || err.message.includes('ENOTFOUND'))) {
+                    try { await client.disconnect(); } catch (e) { }
+                    client = await getSogniClient();
+                    retryCount++;
+                    await new Promise(r => setTimeout(r, 2000 * retryCount));
+                } else {
+                    console.error(`[SONG] ❌ UNRECOVERABLE T2V ERROR:`, err.message);
+                    chunk.status = 'failed';
+                    job.status = 'failed';
+                    job.error = err.message;
+                    job.step = `Error creating video for Part ${chunkIdx + 1}: ${err.message}`;
+                    saveJobs();
+                    return;
+                }
+            }
+        }
+
+        if (!success) {
+            console.error(`[SONG] ❌ T2V FAILED after ${maxRetries} attempts for chunk ${chunkIdx + 1}`);
+            job.status = 'failed';
+            job.error = "Max retries reached for connection issues";
+            job.step = `Error creating video for Part ${chunkIdx + 1}: Connection failed`;
+            saveJobs();
+            return;
+        }
+    }
+
+    // Update step to show active chunks
+    const processingChunks = job.chunks.filter((c: any) => c.status === 'processing');
+    const completedCount = job.chunks.filter((c: any) => c.status === 'completed' || c.status === 'skipped').length;
+    job.step = `Rendering ${processingChunks.length} parts in parallel (${completedCount}/${job.chunks.length} done)`;
+    job.progress = Math.round((completedCount / job.chunks.length) * 100);
+    saveJobs();
+}
+
 
 // Endpoint for full song-to-video processing
 app.post('/api/generate-song-video', upload.single('audio'), async (req: any, res) => {
@@ -677,10 +704,10 @@ app.post('/api/generate-song-video', upload.single('audio'), async (req: any, re
                     parts: [
                         { inlineData: { data: base64Data, mimeType } },
                         {
-                            text: `Analyze the audio transcription and break it down into sequential chunks based on verses/lines. Total duration is ~${duration}s. Provide constraints:
+                            text: `Analyze the audio transcription and break it down into sequential chunks based on verses or thematic sections. Total duration is ~${duration}s. Provide constraints:
 1. "text": transcribed text of this chunk.
-2. "prompt": cinematic descriptive visual prompt for an AI video generator representing this chunk.
-3. "duration": float representing seconds this chunk takes. MUST BE <= 8 seconds. Total duration of all chunks MUST equal ~${duration}.
+2. "prompt": cinematic descriptive visual prompt for an AI video generator representing this chunk. Make it vivid and detailed.
+3. "duration": float representing seconds this chunk takes. MUST BE between 5 and 10 seconds. Aim for 6-12 total chunks to cover the full duration. Total duration of all chunks MUST equal ~${duration}.
 Return strictly as a JSON array of objects with keys: "text", "prompt", "duration".` }
                     ]
                 }
@@ -710,12 +737,13 @@ Return strictly as a JSON array of objects with keys: "text", "prompt", "duratio
         const audioUrl = `${req.protocol}://${req.get('host')}/api/uploads/${fileName}`;
 
         // Initialize the chunks
-        const jobChunks = chunks.map((c: any) => ({
+        const jobChunks = chunks.map((c: any, idx: number) => ({
             ...c,
+            index: idx,
             projectId: null,
             status: 'pending',
             localPath: null,
-            phase: 'image' // Add phase tracking (image -> video)
+            phase: 'video' // Direct T2V — skip image step
         }));
 
         jobs[songJobId] = {
@@ -726,7 +754,8 @@ Return strictly as a JSON array of objects with keys: "text", "prompt", "duratio
             audioPath: newPath,
             step: 'Initializing sequence',
             chunks: jobChunks,
-            currentChunkIndex: 0
+            currentChunkIndex: 0,
+            completedChunks: 0
         };
         saveJobs();
 
@@ -735,16 +764,18 @@ Return strictly as a JSON array of objects with keys: "text", "prompt", "duratio
 
         res.json({ projectId: songJobId, chunks: jobChunks });
 
-        // Start processing the first chunk in background
+        // Start processing chunks in parallel
         const client = await getSogniClient(authData);
 
-        // Ensure listeners are attached BEFORE triggering the first chunk
+        // Ensure listeners are attached BEFORE triggering chunks
         await setupGlobalListeners(client);
 
         // Store auth and tokenType in job for resumption/retries
         jobs[songJobId].auth = authData;
         jobs[songJobId].tokenType = tokenType;
-        triggerNextChunk(songJobId, client);
+
+        // Launch up to PARALLEL_LIMIT chunks at once
+        triggerAvailableChunks(songJobId, client);
 
     } catch (error: any) {
         console.error('Song to video error:', error);
@@ -941,68 +972,66 @@ async function setupGlobalListeners(client: any) {
             };
             saveJobs();
         } else {
-            // Check chunks
+            // Check song-video chunks (T2V direct)
             for (const [songId, job] of Object.entries(jobs)) {
                 if (job.type === 'song-video' && job.status === 'processing') {
-                    const currentChunk = job.chunks[job.currentChunkIndex];
-                    if (currentChunk && currentChunk.projectId === projectId) {
-                        if (currentChunk.phase === 'image') {
-                            if (!imageUrl) {
-                                // Content was filtered — retry with a safe fallback prompt
-                                const filterRetries = currentChunk.filterRetryCount || 0;
-                                const MAX_FILTER_RETRIES = 2;
-
-                                if (filterRetries < MAX_FILTER_RETRIES) {
-                                    currentChunk.filterRetryCount = filterRetries + 1;
-                                    currentChunk.status = 'pending';
-                                    currentChunk.projectId = null;
-                                    // Generate a generic safe cinematic prompt
-                                    const safePrompts = [
-                                        'Cinematic landscape with soft golden light, aerial view of rolling hills at sunrise, no people',
-                                        'Abstract fluid art, swirling vibrant colors on dark canvas, smooth motion',
-                                        'Close-up of musical notes floating in glowing mist, dark ethereal atmosphere'
-                                    ];
-                                    currentChunk.prompt = safePrompts[filterRetries % safePrompts.length];
-                                    console.warn(`[SONG] ⚠️ Image filtered for chunk ${job.currentChunkIndex + 1}. Retrying (${filterRetries + 1}/${MAX_FILTER_RETRIES}) with safe prompt...`);
-                                    addLog(songId, `Part ${job.currentChunkIndex + 1}: Image filtered by safety system. Retrying with alternative visual...`);
-                                    job.step = `Part ${job.currentChunkIndex + 1}: Retrying with safe prompt...`;
-                                    saveJobs();
-                                    // Re-trigger same chunk
-                                    triggerNextChunk(songId, client);
-                                } else {
-                                    // Exhausted retries — skip this chunk and move on
-                                    console.error(`[SONG] ❌ Chunk ${job.currentChunkIndex + 1} exhausted all filter retries. Skipping...`);
-                                    addLog(songId, `Part ${job.currentChunkIndex + 1}: Skipped after repeated filtering.`);
-                                    currentChunk.status = 'skipped';
-                                    job.currentChunkIndex++;
-                                    job.progress = Math.round((job.currentChunkIndex / job.chunks.length) * 100);
-                                    saveJobs();
-                                    triggerNextChunk(songId, client);
-                                }
-                                break;
-                            }
-                            transitionChunkToVideo(songId, currentChunk, imageUrl, client);
-                        } else if (currentChunk.phase === 'video') {
-                            if (!videoUrl) {
-                                job.status = 'failed';
-                                job.error = 'Video media filtered';
+                    // Find the chunk with this projectId
+                    const matchingChunk = job.chunks.find((c: any) => c.projectId === projectId);
+                    if (matchingChunk) {
+                        if (!videoUrl) {
+                            // Content was filtered — retry with safe prompt
+                            const filterRetries = matchingChunk.filterRetryCount || 0;
+                            const MAX_FILTER_RETRIES = 2;
+                            if (filterRetries < MAX_FILTER_RETRIES) {
+                                matchingChunk.filterRetryCount = filterRetries + 1;
+                                matchingChunk.status = 'pending';
+                                matchingChunk.projectId = null;
+                                const safePrompts = [
+                                    'Cinematic landscape with soft golden light, aerial view of rolling hills at sunrise, smooth camera motion',
+                                    'Abstract fluid art, swirling vibrant colors on dark canvas, flowing motion',
+                                    'Close-up of musical notes floating in glowing mist, dark ethereal atmosphere'
+                                ];
+                                matchingChunk.prompt = safePrompts[filterRetries % safePrompts.length];
+                                console.warn(`[SONG] ⚠️ Video filtered for Part ${matchingChunk.index + 1}. Retrying with safe prompt...`);
+                                addLog(songId, `Part ${matchingChunk.index + 1}: Filtered. Retrying with safe prompt...`);
                                 saveJobs();
-                                break;
+                                triggerAvailableChunks(songId, client);
+                            } else {
+                                matchingChunk.status = 'skipped';
+                                console.error(`[SONG] ❌ Part ${matchingChunk.index + 1} skipped after filter retries.`);
+                                addLog(songId, `Part ${matchingChunk.index + 1}: Skipped.`);
+                                saveJobs();
+                                triggerAvailableChunks(songId, client);
                             }
-                            currentChunk.status = 'completed';
-                            fetchWithRetry(videoUrl).then(response => {
-                                const localPath = path.join(uploadsDir, `chunk-${projectId}.mp4`);
-                                const dest = fs.createWriteStream(localPath);
-                                Readable.fromWeb(response.body as any).pipe(dest);
-                                dest.on('finish', () => {
-                                    currentChunk.localPath = localPath;
-                                    job.currentChunkIndex++;
-                                    job.progress = Math.round((job.currentChunkIndex / job.chunks.length) * 100);
-                                    saveJobs();
-                                    triggerNextChunk(songId, client);
-                                });
-                            });
+                            break;
                         }
+
+                        // Video completed — download it
+                        matchingChunk.status = 'completed';
+                        console.log(`[SONG] ✅ Part ${matchingChunk.index + 1} completed: ${projectId}`);
+                        addLog(songId, `Part ${matchingChunk.index + 1} rendered successfully.`);
+
+                        fetchWithRetry(videoUrl).then(response => {
+                            const localPath = path.join(uploadsDir, `chunk-${projectId}.mp4`);
+                            const dest = fs.createWriteStream(localPath);
+                            Readable.fromWeb(response.body as any).pipe(dest);
+                            dest.on('finish', () => {
+                                matchingChunk.localPath = localPath;
+                                const completedCount = job.chunks.filter((c: any) => c.status === 'completed' || c.status === 'skipped').length;
+                                job.progress = Math.round((completedCount / job.chunks.length) * 100);
+                                job.step = `Parts done: ${completedCount}/${job.chunks.length}`;
+                                saveJobs();
+                                // Launch more chunks or stitch
+                                triggerAvailableChunks(songId, client);
+                            });
+                        }).catch(err => {
+                            console.error(`[SONG] ❌ Failed to download video for Part ${matchingChunk.index + 1}:`, err.message);
+                            matchingChunk.status = 'failed';
+                            job.status = 'failed';
+                            job.error = `Download failed for Part ${matchingChunk.index + 1}`;
+                            saveJobs();
+                        });
+                        break;
                     }
                 }
             }
@@ -1027,14 +1056,14 @@ async function setupGlobalListeners(client: any) {
         } else {
             for (const job of Object.values(jobs)) {
                 if (job.type === 'song-video' && job.status === 'processing') {
-                    const currentChunk = job.chunks[job.currentChunkIndex];
-                    if (currentChunk && currentChunk.projectId === projectId) {
+                    const matchingChunk = job.chunks.find((c: any) => c.projectId === projectId);
+                    if (matchingChunk) {
                         const chunkProgress = safePercentage !== null ? ` ${safePercentage}%` : '';
-                        const phaseLabel = currentChunk.phase === 'image' ? 'Image' : 'Video';
-                        job.step = `Rendering Part ${job.currentChunkIndex + 1} of ${job.chunks.length} [${phaseLabel}]${chunkProgress}`;
-                        // Calculate overall progress from chunk completion
-                        const baseProgress = Math.round((job.currentChunkIndex / job.chunks.length) * 100);
-                        const chunkContribution = safePercentage !== null ? Math.round((safePercentage / 100) * (100 / job.chunks.length) * 0.5) : 0;
+                        job.step = `Rendering Part ${matchingChunk.index + 1} of ${job.chunks.length}${chunkProgress}`;
+                        // Calculate overall progress from completed + in-progress chunks
+                        const completedCount = job.chunks.filter((c: any) => c.status === 'completed' || c.status === 'skipped').length;
+                        const baseProgress = Math.round((completedCount / job.chunks.length) * 100);
+                        const chunkContribution = safePercentage !== null ? Math.round((safePercentage / 100) * (100 / job.chunks.length)) : 0;
                         job.progress = Math.min(99, baseProgress + chunkContribution);
                         saveJobs();
                         break;

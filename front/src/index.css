@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Geist:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
 
 :root {
   --bg-obsidian: #050505;
