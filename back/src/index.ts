@@ -99,9 +99,35 @@ app.post('/api/retry/:id', async (req, res) => {
 
 app.get('/api/models', async (req, res) => {
     try {
-        const client = await getSogniClient();
-        const models = await client.getAvailableModels();
-        res.json(models);
+        const auth = req.query.auth ? JSON.parse(req.query.auth as string) : undefined;
+        const client = await getSogniClient(auth);
+        const models = await client.getAvailableModels({ minWorkers: 1 });
+
+        // Group models by media type
+        const grouped: Record<string, any[]> = {};
+        for (const m of models as any[]) {
+            const media: string = m.media || 'unknown';
+            // Classify video subtypes
+            let category: string = media;
+            if (media === 'video') {
+                const id = (m.id || '').toLowerCase();
+                if (id.includes('t2v')) category = 'video_t2v';
+                else if (id.includes('i2v')) category = 'video_i2v';
+                else if (id.includes('a2v')) category = 'video_a2v';
+                else if (id.includes('v2v')) category = 'video_v2v';
+                else if (id.includes('s2v')) category = 'video_s2v';
+                else category = 'video_t2v';
+            }
+            if (!grouped[category]) grouped[category] = [];
+            grouped[category]!.push({
+                id: m.id,
+                name: m.name || m.id,
+                media: category,
+                workers: m.workers || 0
+            });
+        }
+
+        res.json({ models: grouped });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -355,6 +381,40 @@ async function fetchWithRetry(url: string, retries = 5, backoff = 1000): Promise
     throw new Error(`Failed to fetch ${url} after ${retries} attempts`);
 }
 
+app.post('/api/enhance-prompt', async (req, res) => {
+    const { prompt, type = 'image', auth, tokenType = 'spark' } = req.body;
+    if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+
+    try {
+        const authData = auth ? (typeof auth === 'string' ? JSON.parse(auth) : auth) : undefined;
+        const client = await getSogniClient(authData);
+
+        const systemInstructions: Record<string, string> = {
+            image: 'You are an expert AI image prompt engineer. Take the user\'s prompt and expand it into a highly detailed, vivid, and visually rich description optimized for text-to-image AI models. Add specific details about lighting, composition, colors, textures, atmosphere, and style. Keep it as a single paragraph. Return ONLY the enhanced prompt text, nothing else.',
+            video: 'You are an expert AI video prompt engineer. Take the user\'s prompt and expand it into a highly detailed, cinematic description optimized for text-to-video AI models. Include camera movements, lighting transitions, atmosphere, and temporal flow. Keep it as a single paragraph. Return ONLY the enhanced prompt text, nothing else.',
+            song: 'You are an expert music production prompt engineer. Take the user\'s prompt and expand it into a detailed music description covering genre, mood, instruments, rhythm, vocal style, and production quality. Keep it as a single paragraph. Return ONLY the enhanced prompt text, nothing else.',
+        };
+
+        const completion = await client.createChatCompletion({
+            model: 'qwen3-30b-a3b-gptq-int4',
+            messages: [
+                { role: 'system', content: systemInstructions[type] || systemInstructions.image },
+                { role: 'user', content: prompt }
+            ],
+            tokenType: tokenType || 'spark'
+        });
+
+        let enhanced = completion.content || prompt;
+        // Strip any thinking tags if present
+        enhanced = enhanced.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+        res.json({ enhanced });
+    } catch (error: any) {
+        console.error('[Enhance Prompt] Error:', error.message);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/proxy', async (req, res) => {
     const { url } = req.query;
     if (!url || typeof url !== 'string' || !url.startsWith('http')) {
@@ -594,14 +654,30 @@ async function triggerAvailableChunks(songJobId: string, client: any) {
 
         const frames = Math.min(160, Math.max(16, Math.round(chunk.duration * 16)));
 
+        // Determine dimensions based on aspect ratio
+        let width = 832;
+        let height = 480; // 16:9 default
+        if (job.aspectRatio === '9:16') {
+            width = 480;
+            height = 832;
+        } else if (job.aspectRatio === '1:1') {
+            width = 512;
+            height = 512;
+        } else if (job.aspectRatio === '21:9') {
+            width = 1024;
+            height = 424;
+        }
+
+        const cameraInstruction = job.cameraMotion ? `, Camera motion: ${job.cameraMotion}` : '';
+
         const videoConfig = {
             type: 'video',
-            modelId: 'wan_v2.2-14b-fp8_t2v',
-            positivePrompt: `cinematic 360 panoramic view, ${chunk.prompt}`,
+            modelId: job.t2vModelId || 'wan_v2.2-14b-fp8_t2v',
+            positivePrompt: `cinematic 360 panoramic view, ${chunk.prompt}${cameraInstruction}`,
             frames: frames,
             fps: 16,
-            width: 512,
-            height: 512,
+            width: width,
+            height: height,
             tokenType: job.tokenType || 'spark',
             network: 'fast',
             waitForCompletion: false
@@ -706,9 +782,9 @@ app.post('/api/generate-song-video', upload.single('audio'), async (req: any, re
                         {
                             text: `Analyze the audio transcription and break it down into sequential chunks based on verses or thematic sections. Total duration is ~${duration}s. Provide constraints:
 1. "text": transcribed text of this chunk.
-2. "prompt": cinematic descriptive visual prompt for an AI video generator representing this chunk. Make it vivid and detailed.
+2. "basic_description": a very brief, literal description of what the audio sounds like or what the verse says.
 3. "duration": float representing seconds this chunk takes. MUST BE between 5 and 10 seconds. Aim for 6-12 total chunks to cover the full duration. Total duration of all chunks MUST equal ~${duration}.
-Return strictly as a JSON array of objects with keys: "text", "prompt", "duration".` }
+Return strictly as a JSON array of objects with keys: "text", "basic_description", "duration".` }
                     ]
                 }
             ]
@@ -728,58 +804,139 @@ Return strictly as a JSON array of objects with keys: "text", "prompt", "duratio
             chunks = [{ text: "Full song", prompt: "A cinematic music video", duration: duration }];
         }
 
-        console.log(`[SONG] 📋 Gemini returned ${chunks.length} chunks:`);
+        console.log(`[SONG] 📋 Gemini returned ${chunks.length} chunks (basic extraction).`);
+
+        // Get authentication data early to initialize Sogni client for LLM
+        const { theme = '', mood = '', style = '', customPrompt = '', auth, tokenType = 'spark', t2vModelId = '', i2vModelId = '', t2iModelId = '', aspectRatio = '16:9', cameraMotion = '' } = req.body || {};
+        const authData = auth ? (typeof auth === 'string' ? JSON.parse(auth) : auth) : undefined;
+        let sogniClient;
+
+        try {
+            console.log(`[SONG] 🧠 Calling Sogni LLM (Qwen3-30b) to enhance prompts...`);
+            sogniClient = await getSogniClient(authData);
+
+            const promptData = JSON.stringify(chunks.map((c: any) => ({ text: c.text, basic_description: c.basic_description })));
+            let systemInstruction = `You are a visionary AI cinematographer. I will give you a JSON array of audio chunk descriptions. Your job is to generate a highly detailed, vivid, cinematic visual prompt for each chunk to be fed into a text-to-video AI model.`;
+            if (theme) systemInstruction += ` Theme: ${theme}.`;
+            if (mood) systemInstruction += ` Mood: ${mood}.`;
+            if (style) systemInstruction += ` Style: ${style}.`;
+            if (customPrompt) systemInstruction += ` User constraints: ${customPrompt}.`;
+            systemInstruction += `\nReturn ONLY a valid JSON array of strings, where each string is the cinematic prompt for the corresponding chunk. Do not wrap in markdown or add explanations.`;
+
+            const completion = await sogniClient.createChatCompletion({
+                model: 'qwen3-30b-a3b-gptq-int4',
+                messages: [
+                    { role: 'system', content: systemInstruction },
+                    { role: 'user', content: promptData }
+                ],
+                tokenType: tokenType || 'spark'
+            });
+
+            let llmContent = completion.content || "[]";
+            if (llmContent.startsWith('```json')) {
+                llmContent = llmContent.replace(/```json\n?/, '').replace(/```\n?$/, '');
+            }
+
+            const enhancedPrompts = JSON.parse(llmContent);
+            if (Array.isArray(enhancedPrompts) && enhancedPrompts.length === chunks.length) {
+                chunks.forEach((c: any, i: number) => {
+                    c.prompt = enhancedPrompts[i];
+                });
+                console.log(`[SONG] ✅ Sogni LLM successfully generated ${enhancedPrompts.length} cinematic prompts.`);
+            } else {
+                throw new Error("Sogni LLM returned invalid array length.");
+            }
+        } catch (llmError) {
+            console.warn(`[SONG] ⚠️ Failed to use Sogni LLM, falling back to basic descriptions:`, llmError);
+            chunks.forEach((c: any) => {
+                c.prompt = `${style || 'Cinematic'} visualization of: ${c.basic_description || c.text}. ${theme ? 'Theme: ' + theme : ''} ${mood ? 'Mood: ' + mood : ''}`;
+            });
+        }
+
         chunks.forEach((c: any, i: number) => {
-            console.log(`[SONG]    Part ${i + 1}: "${c.text?.substring(0, 50)}..." | ${c.duration}s`);
+            console.log(`[SONG]    Part ${i + 1}: ${c.duration}s | Prompt: "${c.prompt?.substring(0, 50)}..."`);
         });
 
         const songJobId = `song-${Date.now()}`;
         const audioUrl = `${req.protocol}://${req.get('host')}/api/uploads/${fileName}`;
-
-        // Initialize the chunks
-        const jobChunks = chunks.map((c: any, idx: number) => ({
-            ...c,
-            index: idx,
-            projectId: null,
-            status: 'pending',
-            localPath: null,
-            phase: 'video' // Direct T2V — skip image step
-        }));
-
-        jobs[songJobId] = {
-            status: 'processing',
-            type: 'song-video',
-            progress: 0,
+        // Return the plan back to the frontend for Client-Side execution
+        res.json({
+            fileName,
             audioUrl,
-            audioPath: newPath,
-            step: 'Initializing sequence',
-            chunks: jobChunks,
-            currentChunkIndex: 0,
-            completedChunks: 0
-        };
-        saveJobs();
-
-        const { theme = '', mood = '', style = '', customPrompt = '', auth, tokenType = 'spark' } = req.body || {};
-        const authData = auth ? (typeof auth === 'string' ? JSON.parse(auth) : auth) : undefined;
-
-        res.json({ projectId: songJobId, chunks: jobChunks });
-
-        // Start processing chunks in parallel
-        const client = await getSogniClient(authData);
-
-        // Ensure listeners are attached BEFORE triggering chunks
-        await setupGlobalListeners(client);
-
-        // Store auth and tokenType in job for resumption/retries
-        jobs[songJobId].auth = authData;
-        jobs[songJobId].tokenType = tokenType;
-
-        // Launch up to PARALLEL_LIMIT chunks at once
-        triggerAvailableChunks(songJobId, client);
+            duration,
+            chunks: chunks.map((c: any, idx: number) => ({
+                ...c,
+                index: idx,
+                status: 'pending',
+                phase: 'video'
+            }))
+        });
 
     } catch (error: any) {
         console.error('Song to video error:', error);
         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 2. STITCH VIDEO API (Phase 3 of Frontend Orchestration)
+// Accepts array of Sogni video URLs and the audio filename, downloads them, and stitches them.
+app.post('/api/stitch-video', express.json(), async (req, res) => {
+    const { videoUrls, audioFileName } = req.body;
+
+    if (!videoUrls || !Array.isArray(videoUrls) || videoUrls.length === 0) {
+        return res.status(400).json({ error: 'Missing or invalid videoUrls array' });
+    }
+    if (!audioFileName) {
+        return res.status(400).json({ error: 'Missing audioFileName' });
+    }
+
+    const audioPath = path.join(uploadsDir, path.basename(audioFileName));
+    if (!fs.existsSync(audioPath)) {
+        return res.status(404).json({ error: 'Audio file not found on server' });
+    }
+
+    const stitchId = `stitch-${Date.now()}`;
+    const outputFileName = `final-${stitchId}.mp4`;
+    const outputPath = path.join(uploadsDir, outputFileName);
+    const localVideoPaths: string[] = [];
+
+    try {
+        console.log(`[STITCH] Downloading ${videoUrls.length} chunks from Sogni for stitching...`);
+        for (let i = 0; i < videoUrls.length; i++) {
+            const vUrl = videoUrls[i];
+            const localPath = path.join(uploadsDir, `chunk-${stitchId}-${i}.mp4`);
+
+            // Download the Sogni chunk to disk
+            const response = await fetchWithRetry(vUrl);
+            const dest = fs.createWriteStream(localPath);
+            await new Promise((resolve, reject) => {
+                Readable.fromWeb(response.body as any).pipe(dest);
+                dest.on('finish', resolve);
+                dest.on('error', reject);
+            });
+            localVideoPaths.push(localPath);
+            console.log(`[STITCH] Downloaded chunk ${i + 1}/${videoUrls.length}`);
+        }
+
+        console.log(`[STITCH] Proceeding to FFmpeg concatenation...`);
+        const { stitchVideos } = await import('./songWorker.js');
+        await stitchVideos(localVideoPaths, audioPath, outputPath);
+
+        // Cleanup local chunks
+        localVideoPaths.forEach(p => {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+        });
+
+        const finalUrl = `${req.protocol}://${req.get('host')}/api/uploads/${outputFileName}`;
+        res.json({ success: true, finalUrl });
+
+    } catch (error: any) {
+        console.error('[STITCH] Error:', error);
+        // Cleanup on failure
+        localVideoPaths.forEach(p => {
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+        });
         res.status(500).json({ error: error.message });
     }
 });

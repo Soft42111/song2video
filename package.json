@@ -4,5 +4,8 @@
     "scripts": {
         "build": "cd front && npm install && npm run build",
         "install": "cd front && npm install && cd ../back && npm install"
+    },
+    "dependencies": {
+        "@vercel/analytics": "^1.6.1"
     }
 }

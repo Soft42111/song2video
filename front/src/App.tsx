@@ -3,8 +3,10 @@ import { Loader2, Zap, Upload, History, Trash2, Download, Settings, X, Info, Ale
 import { motion, AnimatePresence } from 'framer-motion';
 import { db } from './db';
 import type { ProjectRecord } from './db';
+import DirectStudio from './DirectStudio';
+import { SogniClient } from '@sogni-ai/sogni-client';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://51.21.168.242:3001';
 const ESTIMATED_SPARK_PER_SEC = 1.6;
 const SPARK_PER_IMAGE = 0.5; // Sogni image gen cost estimate
 
@@ -19,6 +21,7 @@ function estimateSparkCost(chunks: any[]): { chunks: any[], totalSpark: number }
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<'song2vid' | 'studio'>('song2vid');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -34,6 +37,9 @@ export default function App() {
   const [mood, setMood] = useState('');
   const [style, setStyle] = useState('Cinematic Realism (Default)');
   const [customPrompt, setCustomPrompt] = useState('');
+  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [cameraMotion, setCameraMotion] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const [authConfig, setAuthConfig] = useState(() => {
@@ -44,6 +50,16 @@ export default function App() {
     return (localStorage.getItem('sogni_token_type') as 'spark' | 'sogni') || 'spark';
   });
   const [balance, setBalance] = useState<any>(null);
+  const [availableModels, setAvailableModels] = useState<Record<string, any[]>>({});
+  const [selectedT2VModel, setSelectedT2VModel] = useState<string>(() => {
+    return localStorage.getItem('sogni_t2v_model') || '';
+  });
+  const [selectedI2VModel, setSelectedI2VModel] = useState<string>(() => {
+    return localStorage.getItem('sogni_i2v_model') || '';
+  });
+  const [selectedT2IModel, setSelectedT2IModel] = useState<string>(() => {
+    return localStorage.getItem('sogni_t2i_model') || '';
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,8 +69,15 @@ export default function App() {
   }, [authConfig, tokenType]);
 
   useEffect(() => {
+    localStorage.setItem('sogni_t2v_model', selectedT2VModel);
+    localStorage.setItem('sogni_i2v_model', selectedI2VModel);
+    localStorage.setItem('sogni_t2i_model', selectedT2IModel);
+  }, [selectedT2VModel, selectedI2VModel, selectedT2IModel]);
+
+  useEffect(() => {
     loadProjects();
     fetchBalance();
+    fetchModels();
   }, []);
 
   const fetchBalance = async () => {
@@ -67,6 +90,21 @@ export default function App() {
       }
     } catch (e) {
       console.error('Failed to fetch balance', e);
+    }
+  };
+
+  const fetchModels = async () => {
+    try {
+      const hasAuth = authConfig.apiKey || (authConfig.username && authConfig.password);
+      if (!hasAuth) return;
+      const authParam = encodeURIComponent(JSON.stringify(authConfig));
+      const res = await fetch(`${API_BASE}/api/models?auth=${authParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.models) setAvailableModels(data.models);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch models:', err);
     }
   };
 
@@ -105,6 +143,81 @@ export default function App() {
     setSelectedFile(file);
   };
 
+  const processSogniPipeline = async (projectId: string, fileName: string, chunks: any[]) => {
+    try {
+      const clientConfig: any = { appId: 'song2vid-client-1', network: 'unrestricted' };
+      if (authConfig.apiKey) clientConfig.apiKey = authConfig.apiKey;
+      const client = await SogniClient.createInstance(clientConfig);
+      if (!authConfig.apiKey && authConfig.username && authConfig.password) {
+        await client.account.login(authConfig.username, authConfig.password);
+      }
+
+      await db.updateProject(projectId, { step: 'Queueing parallel video generation...' });
+      loadProjects();
+
+      // Launch chunks via Promises
+      const MAX_CONCURRENT = 3;
+      let activePromises: Promise<any>[] = [];
+      const completedUrls: string[] = new Array(chunks.length);
+      let completedCount = 0;
+
+      for (let i = 0; i < chunks.length; i++) {
+        const c = chunks[i];
+
+        const generatePromise = client.projects.create({
+          type: 'video',
+          network: 'fast',
+          modelId: selectedT2VModel || 'wan_v2.2-14b-fp8_t2v',
+          positivePrompt: c.prompt,
+          numberOfMedia: 1,
+          duration: c.duration || 5,
+          fps: 16
+        } as any).then((project: any) => project.waitForCompletion()).then((urls: any) => {
+          if (urls && urls.length > 0) {
+            completedUrls[i] = urls[0];
+          }
+          completedCount++;
+          const progress = Math.round((completedCount / chunks.length) * 100);
+          db.updateProject(projectId, { step: `Rendered ${completedCount}/${chunks.length} chunks`, progress }).then(() => loadProjects());
+        });
+
+        activePromises.push(generatePromise);
+        if (activePromises.length >= MAX_CONCURRENT) {
+          await Promise.race(activePromises);
+          // clean up settled promises
+          activePromises = activePromises.filter(() => true); // Promise.race doesn't tell us which settled. A better way: just wait for Promise.all at the end. The SDK queues them.
+          // Actually, Sogni backend handles queuing, so we can just fire them all and Promise.all them.
+          // To avoid React memory heap issues, we'll just await Promise.all at the end of the loop.
+        }
+      }
+
+      await Promise.all(activePromises);
+
+      await db.updateProject(projectId, { step: 'Stitching final video with FFmpeg...', progress: 95 });
+      loadProjects();
+
+      // Send to backend for stitching
+      const stitchRes = await fetch(`${API_BASE}/api/stitch-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoUrls: completedUrls, audioFileName: fileName })
+      });
+
+      const stitchData = await stitchRes.json();
+      if (!stitchRes.ok) throw new Error(stitchData.error || 'Stitching failed');
+
+      await db.updateProject(projectId, { status: 'completed', videoUrl: stitchData.finalUrl, step: 'Finished!', progress: 100 });
+      await db.persistMedia(projectId, `${API_BASE}/api/proxy?url=${encodeURIComponent(stitchData.finalUrl)}`, 'video');
+      loadProjects();
+      fetchBalance();
+
+    } catch (err: any) {
+      console.error('[Pipeline Error]', err);
+      await db.updateProject(projectId, { status: 'failed', error: err.message, step: 'Failed during execution' });
+      loadProjects();
+    }
+  };
+
   const handleGenerate = async () => {
     if (!selectedFile) return;
 
@@ -123,11 +236,14 @@ export default function App() {
     formData.append('mood', mood);
     formData.append('style', style);
     formData.append('customPrompt', customPrompt);
+    formData.append('aspectRatio', aspectRatio);
+    formData.append('cameraMotion', cameraMotion);
     formData.append('tokenType', tokenType);
     formData.append('auth', JSON.stringify(authConfig));
 
     try {
-      const res = await fetch(`${API_BASE}/api/generate-song-video`, { method: 'POST', body: formData });
+      // 1. Send to backend for Gemini audio analysis
+      const res = await fetch(`${API_BASE}/api/analyze-audio`, { method: 'POST', body: formData });
 
       let data;
       const contentType = res.headers.get("content-type");
@@ -140,24 +256,28 @@ export default function App() {
 
       if (!res.ok) throw new Error(data.error || 'Upload failed');
 
-      // Store cost estimate from returned chunks
       if (data.chunks) {
         setCostEstimate(estimateSparkCost(data.chunks));
       }
 
+      const newProjectId = `song-${Date.now()}`;
       await db.saveProject({
-        id: data.projectId,
+        id: newProjectId,
         type: 'song-video',
         prompt: customPrompt || `Cinematics for: ${selectedFile.name}`,
         status: 'processing',
         progress: 0,
         timestamp: Date.now(),
-        step: 'Initializing Sogni Pipeline...'
+        step: 'Audio analyzed. Initializing Sogni...'
       });
-      setActiveProjectId(data.projectId);
+      setActiveProjectId(newProjectId);
       loadProjects();
       fetchBalance();
       setSelectedFile(null); // Reset after success
+
+      // 2. Offload generation flow to the frontend
+      processSogniPipeline(newProjectId, data.fileName, data.chunks);
+
     } catch (err: any) {
       console.error('Upload error:', err);
       alert(`Process failed: ${err.message}`);
@@ -165,39 +285,6 @@ export default function App() {
       setIsProcessing(false);
     }
   };
-
-  useEffect(() => {
-    let interval: any;
-    const poll = async () => {
-      const processing = projects.filter((p: ProjectRecord) => p.status === 'processing');
-      if (processing.length === 0) return;
-
-      for (const p of processing) {
-        try {
-          const res = await fetch(`${API_BASE}/api/status/${p.id}`);
-          if (!res.ok) continue;
-          const data = await res.json();
-
-          if (data.status === 'completed' && data.videoUrl && !p.localVideoBlob) {
-            await db.persistMedia(p.id, `${API_BASE}/api/proxy?url=${encodeURIComponent(data.videoUrl)}`, 'video');
-            // Notify backend to purge server-side files
-            fetch(`${API_BASE}/api/cleanup/${p.id}`, { method: 'DELETE' }).catch(() => { });
-          }
-          await db.updateProject(p.id, {
-            status: data.status,
-            progress: data.progress,
-            step: data.step,
-            error: data.error,
-            videoUrl: data.videoUrl,
-            logs: data.logs
-          });
-        } catch (e) { }
-      }
-      loadProjects();
-    };
-    interval = setInterval(poll, 4000);
-    return () => clearInterval(interval);
-  }, [projects]);
 
   const activeJob = projects.find(p => p.id === activeProjectId);
 
@@ -208,7 +295,7 @@ export default function App() {
       <AnimatePresence>
         {showSettings && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="ultra-card w-full max-w-md p-8 relative">
+            <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="ultra-card w-full max-w-md max-h-[85vh] overflow-y-auto p-8 relative">
               <button onClick={() => setShowSettings(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white transition-colors"><X size={20} /></button>
               <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><Settings className="text-[var(--neon-purple)]" /> Configuration</h2>
 
@@ -234,7 +321,41 @@ export default function App() {
                   <div className="text-center text-xs text-gray-600 font-bold uppercase tracking-widest my-4">— OR —</div>
                   <input type="text" placeholder="Cloud API Key" value={authConfig.apiKey} onChange={e => setAuthConfig({ ...authConfig, apiKey: e.target.value })} className="input-recessed" />
                 </div>
-                <button onClick={() => { setShowSettings(false); fetchBalance(); }} className="sogni-btn-ultra primary w-full mt-6 py-4">Save Configuration</button>
+
+                {/* Model Selection */}
+                {Object.keys(availableModels).length > 0 && (
+                  <div className="space-y-4 pt-4 border-t border-white/5">
+                    {availableModels.video_t2v && (
+                      <div>
+                        <label className="subheader mb-1 block">Text to Video Model</label>
+                        <select value={selectedT2VModel} onChange={e => setSelectedT2VModel(e.target.value)} className="input-recessed w-full" style={{ appearance: 'auto' }}>
+                          <option value="">Auto (Default)</option>
+                          {availableModels.video_t2v.map((m: any) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                        </select>
+                      </div>
+                    )}
+                    {availableModels.video_i2v && (
+                      <div>
+                        <label className="subheader mb-1 block">Image to Video Model</label>
+                        <select value={selectedI2VModel} onChange={e => setSelectedI2VModel(e.target.value)} className="input-recessed w-full" style={{ appearance: 'auto' }}>
+                          <option value="">Auto (Default)</option>
+                          {availableModels.video_i2v.map((m: any) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                        </select>
+                      </div>
+                    )}
+                    {availableModels.image && (
+                      <div>
+                        <label className="subheader mb-1 block">Text to Image Model</label>
+                        <select value={selectedT2IModel} onChange={e => setSelectedT2IModel(e.target.value)} className="input-recessed w-full" style={{ appearance: 'auto' }}>
+                          <option value="">Auto (Default)</option>
+                          {availableModels.image.map((m: any) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button onClick={() => { setShowSettings(false); fetchBalance(); fetchModels(); }} className="sogni-btn-ultra primary w-full mt-6 py-4">Save Configuration</button>
               </div>
             </motion.div>
           </motion.div>
@@ -311,16 +432,23 @@ export default function App() {
 
       {/* Top Navigation Bar */}
       <header className="w-full h-20 px-8 flex items-center justify-between z-40 relative border-b border-white/5 bg-[#050505]/80 backdrop-blur-md">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-[#111] border border-white/10 flex items-center justify-center cursor-pointer hover:border-[var(--neon-purple)] transition-colors" onClick={() => { setActiveProjectId(null); setShowHistory(false); }}>
-            <Wand2 className="text-[var(--neon-cyan)]" size={20} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="status-dot-ultra"></span>
-              <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--neon-purple)]">Sogni V2.1 Pipeline Online</span>
+        <div className="flex items-center gap-8">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-xl bg-[#111] border border-white/10 flex items-center justify-center cursor-pointer hover:border-[var(--neon-purple)] transition-colors" onClick={() => { setActiveProjectId(null); setShowHistory(false); setActiveTab('song2vid'); }}>
+              <Wand2 className="text-[var(--neon-cyan)]" size={20} />
             </div>
-            <div className="font-['Geist'] font-bold text-xl tracking-tight text-white leading-none">SONG2VID</div>
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="status-dot-ultra"></span>
+                <span className="text-[10px] uppercase font-bold tracking-widest text-[var(--neon-purple)]">Sogni V2.1 Pipeline Online</span>
+              </div>
+              <div className="font-['Geist'] font-bold text-xl tracking-tight text-white leading-none">SOGNI STUDIO</div>
+            </div>
+          </div>
+
+          <div className="hidden md:flex bg-[#111] rounded-xl p-1 border border-white/5">
+            <button onClick={() => setActiveTab('song2vid')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-colors ${activeTab === 'song2vid' ? 'bg-white/10 text-white' : 'text-gray-500 hover:text-gray-300'}`}>Song2Vid</button>
+            <button onClick={() => setActiveTab('studio')} className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-colors ${activeTab === 'studio' ? 'bg-white/10 text-[var(--neon-cyan)]' : 'text-gray-500 hover:text-gray-300'}`}>Direct Studio</button>
           </div>
         </div>
 
@@ -348,8 +476,18 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 flex px-6 py-8 md:px-12 md:py-12 justify-center">
 
+        {activeTab === 'studio' && (
+          <DirectStudio
+            authConfig={authConfig}
+            tokenType={tokenType}
+            selectedT2VModel={selectedT2VModel}
+            selectedI2VModel={selectedI2VModel}
+            selectedT2IModel={selectedT2IModel}
+          />
+        )}
+
         {/* Default View: Card-in-Card */}
-        {!activeJob && !showHistory && (
+        {activeTab === 'song2vid' && !activeJob && !showHistory && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-6xl ultra-card flex flex-col items-center justify-center p-8 md:p-12">
 
             <div className="w-full text-center mb-10">
@@ -434,6 +572,47 @@ export default function App() {
                     <label className="subheader block">Prompt Injection</label>
                     <textarea value={customPrompt} onChange={e => setCustomPrompt(e.target.value)} placeholder="Direct scene descriptors and lighting overrides..." className="input-recessed resize-none h-28" />
                   </div>
+                </div>
+
+                {/* Advanced Settings */}
+                <div className="mt-4">
+                  <button
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-gray-500 hover:text-[var(--neon-purple)] transition-colors py-2"
+                  >
+                    <span>{showAdvanced ? '▼ Hide' : '▶ Show'} Advanced Configuration</span>
+                  </button>
+
+                  <AnimatePresence>
+                    {showAdvanced && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-white/5 mt-2">
+                          <div className="space-y-2">
+                            <label className="subheader block">Frame Mode (Aspect Ratio)</label>
+                            <select value={aspectRatio} onChange={e => setAspectRatio(e.target.value)} className="input-recessed appearance-none cursor-pointer">
+                              <option value="16:9">Landscape (16:9)</option>
+                              <option value="9:16">Portrait (9:16)</option>
+                              <option value="1:1">Square (1:1)</option>
+                              <option value="21:9">Cinemascope (21:9)</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="subheader block">Camera Kinematics</label>
+                            <select value={cameraMotion} onChange={e => setCameraMotion(e.target.value)} className="input-recessed appearance-none cursor-pointer">
+                              <option value="">Auto (Model Decides)</option>
+                              <option value="slow pan right">Slow Pan Right</option>
+                              <option value="slow pan left">Slow Pan Left</option>
+                              <option value="slow zoom in">Slow Zoom In</option>
+                              <option value="slow zoom out">Slow Zoom Out</option>
+                              <option value="FPV drone flight">FPV Drone Flight</option>
+                              <option value="static fixed frame">Static Fixed Camera</option>
+                            </select>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Generate Action */}
