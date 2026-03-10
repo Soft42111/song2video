@@ -135,7 +135,13 @@ app.delete('/api/cleanup/:id', async (req, res) => {
     const job = jobs[id];
 
     if (job) {
-        console.log(`[Cleanup] Manual cleanup signal for: ${id}`);
+        console.log(`[Cleanup] Manual cleanup/cancel signal for: ${id}`);
+        // Mark job as cancelled so backend processing stops
+        if (job.status === 'processing') {
+            job.status = 'cancelled';
+            job.step = 'Cancelled by user';
+            console.log(`[Cleanup] ⛔ Job ${id} marked as cancelled. Backend processing will stop.`);
+        }
         // Delete stitched video if it exists
         if (job.videoUrl) {
             const fileName = job.videoUrl.split('/').pop()?.split('?')[0];
@@ -144,9 +150,16 @@ app.delete('/api/cleanup/:id', async (req, res) => {
                 try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (e) { }
             }
         }
-        // Also clear memory log/job state after 1 minute of "completed" status
-        // for now just delete the heavy file
-        res.json({ status: 'cleaned' });
+        // Clean up chunk files
+        if (job.chunks) {
+            job.chunks.forEach((c: any) => {
+                if (c.localPath) {
+                    try { if (fs.existsSync(c.localPath)) fs.unlinkSync(c.localPath); } catch (e) { }
+                }
+            });
+        }
+        saveJobs();
+        res.json({ status: 'cancelled' });
     } else {
         res.status(404).json({ error: 'Job not found' });
     }
@@ -496,6 +509,12 @@ async function triggerNextChunk(songJobId: string, client: any) {
     const job = jobs[songJobId];
     if (!job || job.type !== 'song-video') return;
 
+    // Stop processing if job was cancelled or failed
+    if (job.status === 'cancelled' || job.status === 'failed') {
+        console.log(`[SONG] ⛔ Job ${songJobId} is ${job.status}. Stopping chunk processing.`);
+        return;
+    }
+
     const currentIdx = job.currentChunkIndex;
     const chunk = job.chunks[currentIdx];
 
@@ -738,6 +757,12 @@ Return strictly as a JSON array of objects with keys: "text", "prompt", "duratio
 async function transitionChunkToVideo(songId: string, currentChunk: any, imageUrl: string, client: any) {
     const job = jobs[songId];
     if (!job) return;
+
+    // Stop if job was cancelled
+    if (job.status === 'cancelled' || job.status === 'failed') {
+        console.log(`[SONG] ⛔ Job ${songId} is ${job.status}. Skipping video transition.`);
+        return;
+    }
 
     try {
         console.log(`[SONG] 🎬 CHUNK ${job.currentChunkIndex + 1} — TRANSITIONING IMAGE → VIDEO`);
