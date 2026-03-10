@@ -992,14 +992,14 @@ async function setupGlobalListeners(client: any) {
                                     'Close-up of musical notes floating in glowing mist, dark ethereal atmosphere'
                                 ];
                                 matchingChunk.prompt = safePrompts[filterRetries % safePrompts.length];
-                                console.warn(`[SONG] ⚠️ Video filtered for Part ${matchingChunk.index + 1}. Retrying with safe prompt...`);
-                                addLog(songId, `Part ${matchingChunk.index + 1}: Filtered. Retrying with safe prompt...`);
+                                console.warn(`[SONG] ⚠️ Video filtered for Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1}. Retrying with safe prompt...`);
+                                addLog(songId, `Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1}: Filtered. Retrying with safe prompt...`);
                                 saveJobs();
                                 triggerAvailableChunks(songId, client);
                             } else {
                                 matchingChunk.status = 'skipped';
-                                console.error(`[SONG] ❌ Part ${matchingChunk.index + 1} skipped after filter retries.`);
-                                addLog(songId, `Part ${matchingChunk.index + 1}: Skipped.`);
+                                console.error(`[SONG] ❌ Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1} skipped after filter retries.`);
+                                addLog(songId, `Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1}: Skipped.`);
                                 saveJobs();
                                 triggerAvailableChunks(songId, client);
                             }
@@ -1008,8 +1008,8 @@ async function setupGlobalListeners(client: any) {
 
                         // Video completed — download it
                         matchingChunk.status = 'completed';
-                        console.log(`[SONG] ✅ Part ${matchingChunk.index + 1} completed: ${projectId}`);
-                        addLog(songId, `Part ${matchingChunk.index + 1} rendered successfully.`);
+                        console.log(`[SONG] ✅ Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1} completed: ${projectId}`);
+                        addLog(songId, `Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1} rendered successfully.`);
 
                         fetchWithRetry(videoUrl).then(response => {
                             const localPath = path.join(uploadsDir, `chunk-${projectId}.mp4`);
@@ -1025,10 +1025,10 @@ async function setupGlobalListeners(client: any) {
                                 triggerAvailableChunks(songId, client);
                             });
                         }).catch(err => {
-                            console.error(`[SONG] ❌ Failed to download video for Part ${matchingChunk.index + 1}:`, err.message);
+                            console.error(`[SONG] ❌ Failed to download video for Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1}:`, err.message);
                             matchingChunk.status = 'failed';
                             job.status = 'failed';
-                            job.error = `Download failed for Part ${matchingChunk.index + 1}`;
+                            job.error = `Download failed for Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1}`;
                             saveJobs();
                         });
                         break;
@@ -1059,7 +1059,7 @@ async function setupGlobalListeners(client: any) {
                     const matchingChunk = job.chunks.find((c: any) => c.projectId === projectId);
                     if (matchingChunk) {
                         const chunkProgress = safePercentage !== null ? ` ${safePercentage}%` : '';
-                        job.step = `Rendering Part ${matchingChunk.index + 1} of ${job.chunks.length}${chunkProgress}`;
+                        job.step = `Rendering Part ${(matchingChunk.index ?? job.chunks.indexOf(matchingChunk)) + 1} of ${job.chunks.length}${chunkProgress}`;
                         // Calculate overall progress from completed + in-progress chunks
                         const completedCount = job.chunks.filter((c: any) => c.status === 'completed' || c.status === 'skipped').length;
                         const baseProgress = Math.round((completedCount / job.chunks.length) * 100);
