@@ -186,6 +186,7 @@ export default function DirectStudio({ authConfig, tokenType, selectedT2VModel, 
 
     // ── I2V State ──
     const [i2vPrompt, setI2vPrompt] = useState('');
+    const [i2vModel, setI2vModel] = useState('');
     const [i2vQuantity, setI2vQuantity] = useState(1);
     const [i2vRes, setI2vRes] = useState(0);
     const [i2vFps, setI2vFps] = useState(16);
@@ -300,7 +301,7 @@ export default function DirectStudio({ authConfig, tokenType, selectedT2VModel, 
                     const project = await client.projects.create({
                         type: 'video',
                         network: 'fast',
-                        modelId: selectedI2VModel || 'wan_v2.2-14b-fp8_i2v',
+                        modelId: i2vModel || selectedI2VModel || 'wan_v2.2-14b-fp8_i2v',
                         positivePrompt: i2vPrompt + (i2vStyle ? ', ' + i2vStyle : ''),
                         negativePrompt: i2vNegative,
                         referenceImage: new Blob([imgBuf]),
@@ -345,7 +346,7 @@ export default function DirectStudio({ authConfig, tokenType, selectedT2VModel, 
         }
     }, [activeTab, authConfig, tokenType, imgPrompt, imgQuantity, imgStyle, imgModel, imgRes, imgNegative, imgSeedLocked, imgSeed, imgSteps, selectedT2IModel,
         vidPrompt, vidQuantity, vidRes, vidFps, vidDuration, vidSteps, vidStyle, vidNegative, selectedT2VModel,
-        i2vPrompt, i2vQuantity, i2vRes, i2vFps, i2vDuration, i2vSteps, i2vStyle, i2vNegative, i2vRefImage, selectedI2VModel,
+        i2vPrompt, i2vModel, i2vQuantity, i2vRes, i2vFps, i2vDuration, i2vSteps, i2vStyle, i2vNegative, i2vRefImage, selectedI2VModel,
         songPrompt, songQuantity, songDuration, songLyrics, songLyricsText]);
 
     // ── Tab Config ──
@@ -525,7 +526,7 @@ export default function DirectStudio({ authConfig, tokenType, selectedT2VModel, 
                         </div>
                         <div className="space-y-2">
                             <label className="subheader block">Model</label>
-                            <select value={selectedI2VModel} className="input-recessed w-full" style={{ appearance: 'auto' }} disabled>
+                            <select value={i2vModel} onChange={e => setI2vModel(e.target.value)} className="input-recessed w-full" style={{ appearance: 'auto' }}>
                                 <option value="">Auto (wan_v2.2-14b-fp8_i2v)</option>
                                 <option value="wan_v2.2-14b-fp8_i2v">Wan 2.2 I2V</option>
                                 <option value="wan_v2.2-14b-fp8_i2v_lightx2v">Wan 2.2 I2V LightX2V</option>

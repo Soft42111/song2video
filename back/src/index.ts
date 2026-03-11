@@ -111,7 +111,24 @@ app.get('/api/models', async (req, res) => {
             let category: string = media;
             if (media === 'video') {
                 const id = (m.id || '').toLowerCase();
-                if (id.includes('t2v')) category = 'video_t2v';
+                if (id.includes('ltx')) {
+                    // LTX supports both T2V and I2V
+                    if (!grouped['video_t2v']) grouped['video_t2v'] = [];
+                    if (!grouped['video_i2v']) grouped['video_i2v'] = [];
+                    grouped['video_t2v'].push({
+                        id: m.id,
+                        name: m.name || m.id,
+                        media: 'video_t2v',
+                        workers: m.workers || 0
+                    });
+                    grouped['video_i2v'].push({
+                        id: m.id,
+                        name: m.name || m.id,
+                        media: 'video_i2v',
+                        workers: m.workers || 0
+                    });
+                    continue;
+                } else if (id.includes('t2v')) category = 'video_t2v';
                 else if (id.includes('i2v')) category = 'video_i2v';
                 else if (id.includes('a2v')) category = 'video_a2v';
                 else if (id.includes('v2v')) category = 'video_v2v';
