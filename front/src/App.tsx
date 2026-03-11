@@ -10,7 +10,7 @@ function App() {
           Under Maintenance
         </h1>
         <p className="text-gray-400 mb-6 leading-relaxed">
-          Sogni Studio is currently undergoing scheduled maintenance to bring you exciting new features and improvements. We'll be back online shortly.
+          Song2Vid is currently undergoing scheduled maintenance to bring you exciting new features and improvements. We'll be back online shortly.
         </p>
         <div className="text-sm text-gray-500">
           Thank you for your patience!
