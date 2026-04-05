@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@500;700;900&family=Geist+Mono:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-slate-100 font-sans selection:bg-primary/20;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  /* THE WORKFLOW CONTAINER */
+  .workflow-hub {
+    @apply w-full max-w-workflow-card mx-auto mt-12 mb-20 relative;
+  }
+
+  .workflow-card {
+    @apply bg-[#0f172a] border border-slate-800 rounded-workflow overflow-hidden shadow-[0_32px_64px_-12px_rgba(0,0,0,0.8)] transition-all duration-700;
+  }
+
+  /* TERMINAL LOG COMPONENT */
+  .terminal-box {
+    @apply bg-[#020617] border border-slate-800 rounded-terminal p-6 font-mono text-[11px] leading-relaxed relative overflow-hidden;
+    height: 320px;
+  }
+
+  .terminal-log-line {
+    @apply mb-1.5 flex gap-3;
+  }
+
+  .terminal-timestamp {
+    @apply text-slate-600 font-black whitespace-nowrap;
+  }
+
+  .terminal-content {
+    @apply text-slate-400 font-bold uppercase tracking-tight;
+  }
+
+  /* SCANLINE EFFECT */
+  .scanline {
+    @apply absolute inset-x-0 h-[2px] bg-primary/20 z-10 pointer-events-none;
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+    animation: scanline 4s linear infinite;
+  }
+
+  /* PROGRESS BAR */
+  .workflow-progress-track {
+    @apply w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800/60;
+  }
+
+  .workflow-progress-fill {
+    @apply h-full bg-primary rounded-full transition-all duration-500 shadow-[0_0_10px_rgba(99,102,241,0.5)];
+  }
+
+  /* BUTTONS & ACTIONS */
+  .workflow-btn {
+    @apply px-10 py-4 bg-primary text-white rounded-2xl font-black text-[12px] uppercase tracking-widest transition-all hover:bg-primary/90 active:scale-95 shadow-xl shadow-primary/20;
+  }
+
+  /* BENTO/BENTO-CARD (Legacy Support/Refinement) */
+  .bento-card {
+    @apply bg-slate-900/50 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl;
+  }
+
+  /* INPUTS */
+  .workflow-input {
+    @apply w-full bg-slate-950/60 border border-slate-800 rounded-2xl px-6 py-4 text-sm text-white focus:outline-none focus:border-primary/50 transition-all font-sans placeholder:text-slate-700;
+  }
+}
+
+/* CUSTOM SCROLLBAR */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-950;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-800 rounded-full hover:bg-slate-700;
+}
+
+/* GRADIENT BODY BG */
+.workflow-bg {
+  position: fixed;
+  inset: 0;
+  background: 
+    radial-gradient(circle at top center, rgba(99, 102, 241, 0.08), transparent 60%),
+    #020617;
+  z-index: -1;
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(1000%); }
+}
+
+.animate-scanline {
+  animation: scanline 6s linear infinite;
+}

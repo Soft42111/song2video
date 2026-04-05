@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+*.mp3
+*.wav
+output/
+scripts/
+.DS_Store
+Thumbs.db
