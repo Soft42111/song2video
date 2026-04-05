@@ -27,24 +27,49 @@ export const getSegmentPrompt = async (segment, style = 'cinematic', genre = 'Mu
     bpm,
     genre,
     style: STYLE_PRESETS[style] || STYLE_PRESETS.cinematic,
-    // Add mood detection logic based on spectral analysis (if available)
     mood: estimateMood(segment),
   };
 
   try {
-    const result = await analyzeSegment(segment.index, metadata);
+    const model = "gemini-2.0-flash";
+    const promptText = `
+      Act as a Principal Director of Cinematography. 
+      Generate TWO highly detailed cinematic visual prompts for shard ${segment.index}.
+      
+      CONTEXT:
+      - Music: ${metadata.genre} at ${metadata.bpm} BPM
+      - Style: ${metadata.style}
+      - Mood: ${metadata.mood}
+      
+      1. T2I_PROMPT: A static high-resolution keyframe description. Focus on lighting, world-building, and composition.
+      2. I2V_PROMPT: An animation directive. Describe the camera movement and fluid motion that should occur over ${metadata.duration}s.
+      
+      Output in JSON format: { "t2i": "...", "i2v": "..." }
+    `;
+
+    const result = await analyzeSegment(segment.index, { ...metadata, customPrompt: promptText });
+    
+    // Simple parsing if backend returns the JSON string
+    let parsed = { t2i: result.prompt, i2v: result.prompt };
+    try {
+      if (result.prompt.includes('{')) {
+        const jsonMatch = result.prompt.match(/\{.*\}/s);
+        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+      }
+    } catch (e) {}
+
     return {
-      prompt: result.prompt,
-      tokens: result.estimatedTokens || 0,
-      parameters: result.parameters || {}
+      t2iPrompt: parsed.t2i,
+      i2vPrompt: parsed.i2v,
+      tokens: result.estimatedTokens || 0
     };
   } catch (error) {
-    console.error(`Gemini Analysis Error for segment ${segment.index}:`, error);
-    // Return a fallback prompt to avoid breaking the pipeline
+    console.error(`Gemini I2V Analysis Error for segment ${segment.index}:`, error);
+    const fallback = `${STYLE_PRESETS[style]} responding to ${genre} at ${bpm}bpm.`;
     return {
-      prompt: `${STYLE_PRESETS[style]} responding to ${genre} music at ${bpm}bpm.`,
-      tokens: 0,
-      parameters: {}
+      t2iPrompt: fallback,
+      i2vPrompt: fallback,
+      tokens: 0
     };
   }
 };

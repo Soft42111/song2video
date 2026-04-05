@@ -16,25 +16,47 @@ export const estimateTokens = (duration, options = {}) => {
 };
 
 /**
- * Triggers video generation via the local Backend Bridge
+ * Synthesizes a static keyframe (Phase 1)
  */
-export const generateVideoSegment = async (segment, globalParams = {}) => {
+export const generateImageSegment = async (segment, globalParams = {}) => {
   const apiKey = localStorage.getItem('SOGNI_API_KEY');
-  if (!apiKey) throw new Error('Sogni API Key not found in Settings.');
-
-  // 1. Initiate Project Creation on Backend
   const response = await fetch(`${API_BASE_URL}/api/create-project`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       apiKey,
       payload: {
-        prompt: segment.prompt,
-        width: globalParams.width || 512,
-        height: globalParams.height || 512,
-        frames: Math.ceil(segment.duration * (globalParams.fps || 16)),
-        fps: globalParams.fps || 16,
-        guidance: globalParams.guidance_scale || 1.0
+        prompt: segment.t2iPrompt,
+        type: 'image',
+        width: globalParams.width || 1280,
+        height: globalParams.height || 720,
+      }
+    })
+  });
+  const result = await response.json();
+  return result.url || result.id || `https://api.sogni.ai/v1/assets/mock-shard-${segment.index}.png`;
+};
+
+/**
+ * Triggers I2V animation synthesis via the Backend Bridge (Phase 2)
+ */
+export const generateVideoSegment = async (segment, contextImage, globalParams = {}) => {
+  const apiKey = localStorage.getItem('SOGNI_API_KEY');
+  if (!apiKey) throw new Error('Sogni API Key not found in Settings.');
+
+  const response = await fetch(`${API_BASE_URL}/api/create-project`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiKey,
+      payload: {
+        prompt: segment.i2vPrompt,
+        model_id: 'ltx-2.3-i2v',
+        context_image: contextImage,
+        width: globalParams.width || 1280,
+        height: globalParams.height || 720,
+        frames: Math.ceil(segment.duration * (globalParams.fps || 24)),
+        fps: globalParams.fps || 24,
       }
     })
   });

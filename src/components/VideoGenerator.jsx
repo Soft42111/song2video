@@ -27,44 +27,29 @@ const VideoGenerator = ({ segments, setSegments, isGenerating, setIsGenerating, 
     
     const updatedSegments = [...segments];
 
-    // 1. Analyze All
     for (let i = 0; i < updatedSegments.length; i++) {
-      if (updatedSegments[i].prompt) continue;
+      if (updatedSegments[i].videoUrl) continue;
       
+      setActiveSegment(i);
       onLog(`Analyzing Shard [SH-${(i+1).toString().padStart(3, '0')}]...`, 'info');
       updatedSegments[i].status = 'analyzing';
       setSegments([...updatedSegments]);
 
       try {
-        const { prompt } = await getSegmentPrompt(updatedSegments[i], stylePreset);
-        updatedSegments[i].prompt = prompt;
-        updatedSegments[i].status = 'pending';
-        onLog(`Directive established for SH-${(i+1).toString().padStart(3, '0')}`, 'success');
-      } catch (err) {
-        updatedSegments[i].status = 'failed';
-        onLog(`Analysis failed for SH-${(i+1).toString().padStart(3, '0')}`, 'error');
-      }
-      setSegments([...updatedSegments]);
-    }
-
-    // 2. Generate All
-    for (let i = 0; i < updatedSegments.length; i++) {
-      if (updatedSegments[i].videoUrl) continue;
-      
-      setActiveSegment(i);
-      onLog(`Synthesizing Visual Shard [SH-${(i+1).toString().padStart(3, '0')}]...`, 'info');
-      updatedSegments[i].status = 'generating';
-      setSegments([...updatedSegments]);
-
-      try {
-        const videoUrl = await generateVideoSegment({
-          ...updatedSegments[i],
-          onProgress: (p) => {
-            updatedSegments[i].progress = p;
-            setSegments([...updatedSegments]);
-            updateProgress(updatedSegments);
-          }
-        });
+        // Phase 0: Neural Directives (Gemini)
+        const prompts = await getSegmentPrompt(updatedSegments[i], stylePreset);
+        updatedSegments[i].t2iPrompt = prompts.t2iPrompt;
+        updatedSegments[i].i2vPrompt = prompts.i2vPrompt;
+        
+        // Phase 1: Keyframe Synthesis
+        onLog(`   → Phase 1: Synthesizing Keyframe (T2I)...`, 'info');
+        const keyframeUrl = await generateImageSegment(updatedSegments[i]);
+        updatedSegments[i].imageUrl = keyframeUrl;
+        
+        // Phase 2: Motion Rendering (I2V)
+        onLog(`   → Phase 2: Animating Master (I2V)...`, 'info');
+        const videoUrl = await generateVideoSegment(updatedSegments[i], keyframeUrl);
+        
         updatedSegments[i].videoUrl = videoUrl;
         updatedSegments[i].status = 'generated';
         updatedSegments[i].progress = 100;
